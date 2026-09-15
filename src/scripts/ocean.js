@@ -333,8 +333,18 @@ export function initOcean() {
     vec2 uv = (gl_FragCoord.xy * 2.0 - uRes) / uRes.y;
 
     float d    = clamp(uDive, 0.0, 1.0);
-    float sub  = smoothstep(0.30, 0.75, d);
-    float camY = 3.3 - 17.0 * d * d + sin(uTime * 0.42) * 0.16;
+    float sub  = smoothstep(0.28, 0.85, d); // Starts darkening as soon as we break the surface
+    float bedY = seabedDepth();
+    
+    float camY;
+    if (d < 0.3) {
+      float t = d / 0.3;
+      camY = 3.3 - 3.8 * t * t;
+    } else {
+      float t = (d - 0.3) / 0.7;
+      camY = mix(-0.5, bedY + 1.5, t);
+    }
+    camY += sin(uTime * 0.42) * 0.16;
 
     /* gentle refractive wobble once submerged */
     uv += vec2(sin(uv.y * 7.0 + uTime * 0.9), cos(uv.x * 6.0 + uTime * 0.75)) * 0.0045 * sub;
