@@ -17,16 +17,16 @@ export const Dive = (function () {
   }
 
   /* piecewise depth mapping:
-     Phase 1 (0.0 - 0.3): scroll to #work, dive from 3.3 to -0.5m (just submerged)
-     Phase 2 (0.3 - 1.0): scroll to bottom, dive from -0.5m to safe margin above floor */
+     Phase 1 (0.0 - 0.3): scroll to #work, dive from 3.3 to -4.0 (a satisfying initial plunge)
+     Phase 2 (0.3 - 1.0): scroll to bottom, dive from -4.0 to a safe margin above floor */
   function camFromDive(d) {
     if (d < 0.3) {
       const t = d / 0.3;
-      return 3.3 - 3.8 * t * t;
+      return 3.3 - 7.3 * t * t;
     } else {
       const t = (d - 0.3) / 0.7;
       const floorY = getBedY() + 1.5; // stop 1.5 units above the actual seabed
-      return -0.5 + (floorY - (-0.5)) * t;
+      return -4.0 + (floorY - (-4.0)) * t;
     }
   }
 

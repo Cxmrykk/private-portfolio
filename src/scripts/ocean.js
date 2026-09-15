@@ -333,16 +333,18 @@ export function initOcean() {
     vec2 uv = (gl_FragCoord.xy * 2.0 - uRes) / uRes.y;
 
     float d    = clamp(uDive, 0.0, 1.0);
-    float sub  = smoothstep(0.28, 0.85, d); // Starts darkening as soon as we break the surface
+    /* shift start of sub effect down so we only trigger heavy underwater VFX 
+       when we are actually breaking the surface */
+    float sub  = smoothstep(0.15, 0.60, d); 
     float bedY = seabedDepth();
     
     float camY;
     if (d < 0.3) {
       float t = d / 0.3;
-      camY = 3.3 - 3.8 * t * t;
+      camY = 3.3 - 7.3 * t * t;
     } else {
       float t = (d - 0.3) / 0.7;
-      camY = mix(-0.5, bedY + 1.5, t);
+      camY = mix(-4.0, bedY + 1.5, t);
     }
     camY += sin(uTime * 0.42) * 0.16;
 
