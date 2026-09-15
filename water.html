@@ -42,26 +42,58 @@ body{
   position:fixed; inset:0;
   width:100%; height:100%;
   display:block;
-  z-index:-2;
+  z-index:-3;
 }
 /* CSS-only fallback if WebGL2 is unavailable */
 .no-webgl #sea{display:none}
-.no-webgl body, body.no-webgl{
+body.no-webgl{
   background:
     radial-gradient(120% 70% at 70% 8%, rgba(255,255,255,.9), rgba(255,255,255,0) 55%),
     linear-gradient(180deg,#1b6fc4 0%, #49b4e8 38%, #7fd6f2 52%, #0c5f96 53%, #063a60 100%) fixed;
+  transition:background .9s ease;
+}
+body.no-webgl.is-underwater{
+  background:
+    radial-gradient(70% 40% at 52% -6%, rgba(200,245,255,.55), rgba(120,210,240,0) 62%),
+    linear-gradient(180deg,#0b6ea8 0%, #075982 30%, #04405f 62%, #02293d 100%) fixed;
 }
 
 /* soft horizon haze + top light, sits above canvas, below content */
 .atmosphere{
-  position:fixed; inset:0; z-index:-1; pointer-events:none;
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  transition:opacity .9s ease;
   background:
     radial-gradient(90% 46% at 50% 0%, rgba(255,255,255,.34), rgba(255,255,255,0) 62%),
     radial-gradient(60% 30% at 78% 12%, rgba(255,235,180,.30), rgba(255,235,180,0) 70%);
 }
+body.is-underwater .atmosphere{opacity:0}
+
+/* ---------- caustic light dancing over the page, underwater only ---------- */
+.caustics{
+  position:fixed; inset:-25%; z-index:-1; pointer-events:none;
+  opacity:0; visibility:hidden;
+  mix-blend-mode:screen;
+  transition:opacity 1.4s ease, visibility 0s linear 1.4s;
+  background:
+    radial-gradient(55% 32% at 26% 18%, rgba(190,255,255,.17), rgba(190,255,255,0) 62%),
+    radial-gradient(42% 26% at 68% 42%, rgba(160,240,255,.15), rgba(160,240,255,0) 64%),
+    radial-gradient(48% 30% at 44% 78%, rgba(140,230,250,.12), rgba(140,230,250,0) 66%);
+  animation:causticDrift 28s ease-in-out infinite alternate;
+}
+body.is-underwater .caustics{opacity:1; visibility:visible; transition:opacity 1.4s ease, visibility 0s}
+@keyframes causticDrift{
+  0%{transform:translate3d(-2%,-1%,0) scale(1)}
+  50%{transform:translate3d(3%,2%,0) scale(1.06)}
+  100%{transform:translate3d(-1%,3%,0) scale(1.02)}
+}
 
 /* ---------- floating bubbles ---------- */
-.bubbles{position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden}
+.bubbles{
+  position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden;
+  opacity:0; visibility:hidden;
+  transition:opacity 1.1s ease, visibility 0s linear 1.1s;
+}
+body.is-underwater .bubbles{opacity:1; visibility:visible; transition:opacity 1.1s ease, visibility 0s}
 .bubbles b{
   position:absolute; bottom:-18vh;
   border-radius:50%;
@@ -77,6 +109,65 @@ body{
   12%{opacity:.85}
   88%{opacity:.7}
   100%{transform:translate3d(var(--drift,24px),-124vh,0) scale(1.08); opacity:0}
+}
+
+/* ---------- marine life ---------- */
+.marine{
+  position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden;
+  opacity:0; visibility:hidden;
+  transition:opacity 1.3s ease, visibility 0s linear 1.3s;
+}
+body.is-underwater .marine{opacity:1; visibility:visible; transition:opacity 1.3s ease, visibility 0s}
+
+.swim{position:absolute; left:0; top:0; will-change:transform; animation:swimR linear infinite}
+.swim.rev{animation-name:swimL}
+@keyframes swimR{from{transform:translate3d(-32vw,0,0)} to{transform:translate3d(132vw,0,0)}}
+@keyframes swimL{from{transform:translate3d(132vw,0,0)} to{transform:translate3d(-32vw,0,0)}}
+
+.lean{display:block; animation:bob ease-in-out infinite alternate; will-change:transform}
+@keyframes bob{
+  from{transform:translateY(-9px) rotate(-3.5deg)}
+  to{transform:translateY(9px) rotate(3.5deg)}
+}
+
+.float{position:absolute; left:0; bottom:0; will-change:transform; animation:ascend linear infinite}
+@keyframes ascend{
+  from{transform:translate3d(0,18vh,0)}
+  to{transform:translate3d(var(--drift,40px),-132vh,0)}
+}
+.pulse{display:block; animation:jelly ease-in-out infinite alternate; transform-origin:50% 18%}
+@keyframes jelly{
+  from{transform:scale(1,.88)}
+  to{transform:scale(.9,1.06)}
+}
+
+svg.fish .bod, svg.fish .tail, svg.fish .fin{fill:currentColor}
+svg.fish .tail, svg.fish .fin{opacity:.8}
+svg.fish .gloss{fill:rgba(255,255,255,.42)}
+svg.fish .band{fill:rgba(255,255,255,.28)}
+svg.fish .eyeW{fill:#fff}
+svg.fish .eyeB{fill:#07243b}
+svg.jelly .bell{fill:currentColor; opacity:.5}
+svg.jelly .gloss{fill:rgba(255,255,255,.5)}
+svg.jelly .tent{stroke:currentColor; stroke-width:2.4; opacity:.42}
+
+.snow b{
+  position:absolute; top:-6vh; border-radius:50%;
+  background:radial-gradient(circle at 40% 35%, rgba(255,255,255,.95), rgba(210,240,255,.35) 70%, rgba(210,240,255,0));
+  animation:sink linear infinite;
+}
+@keyframes sink{
+  0%{transform:translate3d(0,0,0); opacity:0}
+  10%{opacity:.75}
+  90%{opacity:.55}
+  100%{transform:translate3d(var(--drift,18px),118vh,0); opacity:0}
+}
+
+/* ---------- surface-break veil ---------- */
+.splash{
+  position:fixed; inset:0; z-index:12; pointer-events:none; opacity:0;
+  background:
+    radial-gradient(120% 95% at 50% 38%, rgba(255,255,255,.88), rgba(205,244,255,.62) 40%, rgba(130,210,242,.38) 70%, rgba(70,170,220,.18) 100%);
 }
 
 /* ============================================================
@@ -96,6 +187,17 @@ body{
     inset 0 -22px 34px -26px rgba(8,74,122,.55);
   -webkit-backdrop-filter:blur(16px) saturate(165%);
   backdrop-filter:blur(16px) saturate(165%);
+  transition:background .9s ease, box-shadow .9s ease;
+}
+body.is-underwater .glass{
+  background:linear-gradient(180deg,
+      rgba(235,253,255,.84) 0%,
+      rgba(205,241,253,.60) 46%,
+      rgba(181,229,247,.66) 100%);
+  box-shadow:
+    0 26px 52px -22px rgba(1,26,45,.72),
+    inset 0 1px 0 rgba(255,255,255,.96),
+    inset 0 -24px 36px -26px rgba(6,60,100,.6);
 }
 /* the signature Aqua gloss cap */
 .glass::before{
@@ -173,6 +275,28 @@ nav.bar-nav a:hover{
   max-width:24ch;
 }
 .hero .cta-row{display:flex; gap:12px; flex-wrap:wrap; margin-top:34px}
+
+.dive-hint{
+  display:inline-flex; align-items:center; gap:11px; margin-top:30px;
+  color:#e8f8ff; font-size:14px; text-decoration:none; width:max-content;
+  text-shadow:0 1px 3px rgba(4,40,70,.6);
+  opacity:.95; transition:opacity .6s ease;
+}
+.dive-hint .chev{
+  width:28px; height:28px; border-radius:50%; flex:none;
+  display:grid; place-items:center;
+  border:1px solid rgba(255,255,255,.7);
+  background:rgba(255,255,255,.16);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.7);
+  animation:nudge 2.2s ease-in-out infinite;
+}
+.dive-hint .chev::after{
+  content:""; width:7px; height:7px;
+  border-right:2px solid #fff; border-bottom:2px solid #fff;
+  transform:translateY(-2px) rotate(45deg);
+}
+@keyframes nudge{0%,100%{transform:translateY(0)}50%{transform:translateY(5px)}}
+body.is-underwater .dive-hint{opacity:0}
 
 /* ---------- gel buttons ---------- */
 .btn{
@@ -292,7 +416,7 @@ footer a{color:#fff}
 /* ---------- water controls ---------- */
 .sea-controls{
   position:fixed; right:16px; bottom:16px; z-index:30;
-  display:flex; align-items:center; gap:6px; padding:6px; border-radius:999px;
+  display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:999px;
 }
 .sea-controls button{
   cursor:pointer; font:600 12.5px/1 "Segoe UI",Tahoma,sans-serif;
@@ -311,6 +435,17 @@ footer a{color:#fff}
   background:linear-gradient(180deg, rgba(255,255,255,0), rgba(8,74,122,.2) 50%, rgba(255,255,255,0));
   margin:0 2px;
 }
+.gauge{
+  display:flex; align-items:center; gap:7px;
+  font:600 12.5px/1 "Segoe UI",Tahoma,sans-serif; color:#0b4d78;
+  padding:0 8px 0 4px; white-space:nowrap;
+}
+.gauge .dot{
+  width:9px; height:9px; border-radius:50%; flex:none;
+  background:radial-gradient(circle at 35% 30%, #fff, #7fd3ff 45%, #0b6fb4 100%);
+  box-shadow:0 0 8px rgba(40,170,230,.8);
+}
+.gauge #depth{min-width:54px; display:inline-block; text-align:right; font-variant-numeric:tabular-nums}
 
 /* ---------- a11y ---------- */
 a:focus-visible, button:focus-visible{
@@ -327,11 +462,12 @@ a:focus-visible, button:focus-visible{
   .split{grid-template-columns:1fr}
   .about{grid-template-columns:1fr}
   nav.bar-nav{width:100%; margin-left:0}
-  .sea-controls {flex-wrap:wrap; max-width: 280px; justify-content: center;}
+  .sea-controls {flex-wrap:wrap; max-width: 300px; justify-content: center;}
 }
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
-  .bubbles{display:none}
+  .bubbles, .marine{display:none}
+  .caustics{animation:none}
   *{animation-duration:.001ms !important; transition-duration:.001ms !important}
 }
 </style>
@@ -341,7 +477,34 @@ a:focus-visible, button:focus-visible{
 
 <canvas id="sea" aria-hidden="true"></canvas>
 <div class="atmosphere" aria-hidden="true"></div>
+<div class="caustics" aria-hidden="true"></div>
+<div class="marine" id="marine" aria-hidden="true"></div>
 <div class="bubbles" id="bubbles" aria-hidden="true"></div>
+<div class="splash" id="splash" aria-hidden="true"></div>
+
+<!-- shared vector shapes for the marine life -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <symbol id="fishShape" viewBox="0 0 100 60">
+    <path class="tail" d="M26 30 L2 9 Q11 30 2 51 Z"/>
+    <path class="fin" d="M47 15 Q55 -1 73 11 Z"/>
+    <path class="fin" d="M45 45 Q51 59 65 49 Z"/>
+    <ellipse class="bod" cx="55" cy="30" rx="33" ry="16"/>
+    <path class="band" d="M46 15 q7 15 0 30 l7 0 q7 -15 0 -30 Z"/>
+    <ellipse class="gloss" cx="56" cy="22" rx="24" ry="7"/>
+    <circle class="eyeW" cx="77" cy="25" r="4"/>
+    <circle class="eyeB" cx="78" cy="25" r="2"/>
+  </symbol>
+  <symbol id="jellyShape" viewBox="0 0 80 112">
+    <path class="bell" d="M5 45 Q5 7 40 7 Q75 7 75 45 Q61 36 53 47 Q46 38 40 47 Q34 38 27 47 Q19 36 5 45 Z"/>
+    <path class="gloss" d="M17 31 Q25 16 41 16 Q30 23 24 36 Z"/>
+    <g class="tent" fill="none" stroke-linecap="round">
+      <path d="M25 47 q-5 23 2 42"/>
+      <path d="M35 49 q-2 25 3 46"/>
+      <path d="M46 49 q5 22 -2 44"/>
+      <path d="M56 45 q7 21 1 40"/>
+    </g>
+  </symbol>
+</defs></svg>
 
 <header class="bar">
   <div class="shell">
@@ -368,6 +531,7 @@ a:focus-visible, button:focus-visible{
         <a class="btn" href="#work">See the projects</a>
         <a class="btn ghost" href="#contact">Get in touch</a>
       </div>
+      <a class="dive-hint" href="#work"><span class="chev"></span>Scroll to dive</a>
     </section>
 
     <section id="work">
@@ -492,7 +656,7 @@ a:focus-visible, button:focus-visible{
 </main>
 
 <footer>
-  <div class="shell">Built from scratch — the ocean above is a WebGL shader, no images or libraries. <a href="#top">Back to top</a></div>
+  <div class="shell">Built from scratch — the swell you started on and the water you're in now are one WebGL shader, no images or libraries. <a href="#top">Back to the surface</a></div>
 </footer>
 
 <div class="sea-controls glass" role="group" aria-label="Water controls">
@@ -503,11 +667,75 @@ a:focus-visible, button:focus-visible{
   <button type="button" data-group="depth" data-sea="shallow" aria-pressed="false">Shallow</button>
   <div class="divider"></div>
   <button type="button" data-group="play" data-sea="pause" aria-pressed="false">Pause</button>
+  <div class="divider"></div>
+  <span class="gauge" aria-hidden="true"><span class="dot"></span><span id="depth">Surface</span></span>
 </div>
 
 <script>
 /* ============================================================
-   1. THE OCEAN — WebGL2, procedural, realistic multi-pass lighting
+   0. DIVE CONTROLLER — maps scroll position to camera depth
+   ============================================================ */
+const Dive = (function () {
+  const splash  = document.getElementById('splash');
+  const readout = document.getElementById('depth');
+  const body    = document.body;
+
+  let target = 0, current = 0, camY = 3.3, raf = null, under = false, lastTxt = '';
+  const listeners = [];
+
+  /* must match the camera curve inside the fragment shader */
+  function camFromDive(d){ return 3.3 - 17.0 * d * d; }
+
+  function apply(){
+    camY = camFromDive(current);
+
+    /* white-water veil while breaking the surface */
+    if (splash){
+      const s = Math.max(0, 1 - Math.abs(camY) / 2.0);
+      splash.style.opacity = (s * s * 0.7).toFixed(3);
+    }
+
+    /* hysteresis so the class does not flicker on the boundary */
+    if (!under && camY < 0.15){ under = true;  body.classList.add('is-underwater'); }
+    else if (under && camY > 0.9){ under = false; body.classList.remove('is-underwater'); }
+
+    if (readout){
+      const txt = camY > 0 ? 'Surface' : (-camY * 1.55).toFixed(1) + ' m';
+      if (txt !== lastTxt){ readout.textContent = txt; lastTxt = txt; }
+    }
+
+    for (let i = 0; i < listeners.length; i++) listeners[i](current);
+  }
+
+  function loop(){
+    current += (target - current) * 0.085;
+    if (Math.abs(target - current) < 0.0004) current = target;
+    apply();
+    raf = (current === target) ? null : requestAnimationFrame(loop);
+  }
+
+  function measure(){
+    const span = Math.max(window.innerHeight * 1.25, 1);
+    target = Math.min(1, Math.max(0, window.scrollY / span));
+    if (raf === null) raf = requestAnimationFrame(loop);
+  }
+
+  window.addEventListener('scroll', measure, { passive: true });
+  window.addEventListener('resize', measure);
+
+  measure();
+  current = target;
+  apply();
+
+  return {
+    get value(){ return current; },
+    get camY(){ return camY; },
+    onUpdate(fn){ listeners.push(fn); }
+  };
+})();
+
+/* ============================================================
+   1. THE OCEAN — WebGL2, procedural, above and below the surface
    ============================================================ */
 (function () {
   const canvas = document.getElementById('sea');
@@ -525,7 +753,7 @@ a:focus-visible, button:focus-visible{
     gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
   }`;
 
-  /* ---- fragment: sky, sum of sines wave field, and realistic shading ---- */
+  /* ---- fragment ---- */
   const FRAG = `#version 300 es
   precision highp float;
 
@@ -535,13 +763,16 @@ a:focus-visible, button:focus-visible{
   uniform float uScroll;
   uniform float uChop;     // 0.55 calm .. 1.0 choppy
   uniform float uShallow;  // 0.0 deep ocean .. 1.0 shallow refractive reef
+  uniform float uDive;     // 0.0 above the swell .. 1.0 at depth
 
   out vec4 fragColor;
 
-  #define SUN normalize(vec3(0.34, 0.20, -0.92))
+  #define SUN   normalize(vec3(0.34, 0.20, -0.92))
+  /* Sunlight refracted through the surface bends toward the vertical,
+     so the underwater shafts are much steeper than the sun itself. */
+  #define SHAFT normalize(vec3(0.254, 0.682, -0.686))
 
   /* ---------- noise functions ---------- */
-  // High quality hash to avoid repeating diagonal/grid artifacts on older GPUs
   float hash21(vec2 p) {
     vec3 p3  = fract(vec3(p.xyx) * 0.1031);
     p3 += dot(p3, p3.yzx + 33.33);
@@ -565,8 +796,8 @@ a:focus-visible, button:focus-visible{
   }
 
   /* ---------- wave field ----------
-     Sum of sines, pushed through exp() to sharpen crests. 
-     Uses Continuous Screen-Space LOD to fade out sub-pixel waves and eliminate spatial aliasing/moire grids. */
+     Sum of sines pushed through exp() to sharpen crests, with continuous
+     screen-space LOD so sub-pixel waves fade out instead of aliasing. */
   float waveField(vec2 p, float dist, int max_octaves, out vec2 grad){
     float h = 0.0;
     grad = vec2(0.0);
@@ -574,30 +805,26 @@ a:focus-visible, button:focus-visible{
     float ang = 0.0;
     vec2 warp = vec2(0.0);
 
-    // Approximate size of a pixel footprint at this world distance
-    float pixel_width = max(dist * 0.0025, 0.001); 
+    float pixel_width = max(dist * 0.0025, 0.001);
 
     for (int i = 0; i < 14; i++){
-      if (i >= max_octaves) break; // Hard limit for raymarching performance
+      if (i >= max_octaves) break;
 
       float wave_width = 1.0 / freq;
-      // Smoothly fade out the mathematical effect of waves smaller than ~2 pixels wide.
-      // This is the mathematical key to removing the hash/grid moire artifact in the distance.
       float lod = smoothstep(pixel_width, pixel_width * 3.0, wave_width);
       if (lod < 0.001) break;
 
       ang += 2.39996;                               // golden angle offset
       vec2 d = vec2(cos(ang), sin(ang));
       float ph = dot(p + warp, d) * freq + uTime * speed * freq * 2.4;
-      
+
       float s  = sin(ph);
       float w  = exp(k * s - k);                    // sharp crest, flat trough
       float dw = k * cos(ph) * w;
 
-      // Apply lod suppression directly to the wave height and its derivative gradient
       h    += amp * w * lod;
       grad += amp * dw * freq * d * lod;
-      warp += d * w * amp * 0.38 * lod;             // domain warp based on prev wave
+      warp += d * w * amp * 0.38 * lod;
 
       amp *= 0.66; freq *= 1.79; speed *= 1.06; k *= 0.93;
     }
@@ -605,12 +832,9 @@ a:focus-visible, button:focus-visible{
     return h * 0.80 - 0.55;
   }
 
-  /* Fixed low-detail height field exclusively for finding the intersection */
   float waveHeight(vec2 p, int max_octaves){
     vec2 g;
-    // Pass distance as 0.0 to ignore LOD fading during the intersection search.
-    // This keeps the curve uniform and prevents the secant method from oscillating.
-    return waveField(p, 0.0, max_octaves, g); 
+    return waveField(p, 0.0, max_octaves, g);
   }
 
   /* ---------- sky ---------- */
@@ -638,21 +862,19 @@ a:focus-visible, button:focus-visible{
     return col;
   }
 
-  /* ---------- ray marching ---------- */
+  /* ---------- ray marching, from above ---------- */
   float traceOcean(vec3 ro, vec3 rd, out vec3 hitP){
     float tn = 0.0, tf = 300.0;
-    
-    // Quick exit if ray is looking at the sky above the water
-    if (rd.y > 0.01 && ro.y > 0.5) return -1.0; 
+    hitP = ro;
 
-    // Find bounding intersection
+    if (rd.y > 0.01 && ro.y > 0.5) return -1.0;
+
     float tm = tn;
     float dN = ro.y - waveHeight(ro.xz, 5);
     float dF = (ro.y + rd.y * tf) - waveHeight((ro + rd * tf).xz, 5);
-    
-    if (dF > 0.0) return -1.0; // ray escapes completely
 
-    // Secant root finding iteration against a low-resolution geometric mesh
+    if (dF > 0.0) return -1.0;
+
     for (int i = 0; i < 11; i++){
       tm = mix(tn, tf, dN / (dN - dF));
       vec3 p = ro + rd * tm;
@@ -661,6 +883,17 @@ a:focus-visible, button:focus-visible{
     }
     hitP = ro + rd * tm;
     return tm;
+  }
+
+  /* ---------- the underside of the surface, traced from below ---------- */
+  float traceUnderside(vec3 ro, vec3 rd){
+    float t = (0.0 - ro.y) / max(rd.y, 0.02);
+    for (int i = 0; i < 4; i++){
+      vec3 p = ro + rd * t;
+      float h = waveHeight(p.xz, 5);
+      t = max((h - ro.y) / max(rd.y, 0.02), 0.02);
+    }
+    return t;
   }
 
   /* ---------- refractive caustics ---------- */
@@ -676,83 +909,156 @@ a:focus-visible, button:focus-visible{
     return pow(clamp(c * 0.5 + 0.5, 0.0, 1.0), 4.0);
   }
 
-  /* ---------- realistic multi-pass water shading ---------- */
+  /* ---------- surface shading, seen from above ---------- */
   vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
-    // 1. Reflected Sky
     vec3 refl = reflect(rd, n);
     refl.y = max(refl.y, 0.015);
     vec3 skyCol = sky(refl);
 
-    // 2. Fresnel (Schlick's approx)
     float f0 = 0.02;
     float fres = f0 + (1.0 - f0) * pow(clamp(1.0 - dot(-rd, n), 0.0, 1.0), 5.0);
 
-    // 3. Base Color & Translucency
     float crest = clamp(p.y * 0.95 + 0.45, 0.0, 1.0);
 
-    // --- Mode A: Deep Volumetric Ocean ---
     vec3 deepD    = vec3(0.005, 0.080, 0.180);
     vec3 shallowD = vec3(0.030, 0.350, 0.480);
     vec3 bodyDeep = mix(deepD, shallowD, crest);
-    // Wrap-lit subsurface scattering inside thick waves
     float sss = pow(clamp(dot(n, SUN) * 0.5 + 0.5, 0.0, 1.0), 3.0) * crest;
     bodyDeep += vec3(0.12, 0.45, 0.35) * sss * 0.8;
 
-    // --- Mode B: Shallow Reef (Refraction & Caustics) ---
-    vec3 rdRefr = refract(rd, n, 1.0 / 1.333); // Air to water IOR
+    vec3 rdRefr = refract(rd, n, 1.0 / 1.333);
     float floorY = -1.6;
     float tFloor = (floorY - p.y) / min(rdRefr.y, -0.01);
     vec3 pFloor = p + rdRefr * tFloor;
-    
+
     float caustics = getCaustics(pFloor.xz);
     float sandRipples = sin(pFloor.x * 6.0 + sin(pFloor.z * 4.0)) * 0.05 + 0.95;
     vec3 sand = vec3(0.85, 0.80, 0.65) * sandRipples;
     vec3 floorC = sand + vec3(1.0, 0.95, 0.8) * caustics * 2.0;
 
     float depthWalk = max(tFloor, 0.0);
-    // Beer's Law for water absorption (rapidly drops red, retains blue/green)
     vec3 extinction = exp(-vec3(0.8, 0.25, 0.05) * depthWalk);
     vec3 scatter = vec3(0.0, 0.4, 0.5) * (1.0 - extinction) * 0.3;
     vec3 bodyShallow = floorC * extinction + scatter;
 
-    // Blend approaches based on UI state
     vec3 body = mix(bodyDeep, bodyShallow, uShallow);
 
-    // 4. Sun Shimmer / Micro-facets
     vec3 hv = normalize(SUN - rd);
-    // Broad, standard specular
     float specMain = pow(clamp(dot(n, hv), 0.0, 1.0), 400.0) * 3.0;
-    
-    // Smoothly fade out the expensive micro-facet noise based on distance to prevent far-plane hash flickering
+
     float microFade = smoothstep(50.0, 10.0, dist);
     float spec = specMain;
-    
+
     if (microFade > 0.01) {
-      // Rotation matrix to deliberately skew the value noise and hide lattice alignments
       mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
       vec2 microUV = p.xz * 12.0 - uTime * 0.3;
       float micro = vnoise(rot * microUV) * 0.5 + 0.5;
-      
-      // Perturb normal to create high-frequency micro glints
       vec3 nGlint = normalize(n + vec3(micro * 0.15, 0.0, micro * 0.15) * microFade);
       float specGlint = pow(clamp(dot(nGlint, hv), 0.0, 1.0), 1500.0) * (8.0 * microFade);
       spec += specGlint;
     }
 
-    // 5. Foam (Organic noise-driven)
     float steep = 1.0 - n.y;
     mat2 foamRot = mat2(0.8, -0.6, 0.6, 0.8);
     float foamNoise = vnoise(foamRot * (p.xz * 3.5 + uTime * 0.4));
     float foam = smoothstep(0.15, 0.35, steep) * smoothstep(0.20, 0.85, crest) * (foamNoise * 0.8 + 0.2);
 
-    // Combine
     vec3 col = mix(body, skyCol, fres);
     col += vec3(1.0, 0.95, 0.85) * spec;
     col = mix(col, vec3(0.9, 0.95, 1.0), foam * 0.5 * uChop);
 
-    // 6. Fog
     float fog = 1.0 - exp(-dist * 0.0035);
     col = mix(col, sky(vec3(rd.x, 0.004, rd.z)), fog);
+
+    return col;
+  }
+
+  /* ============================================================
+     UNDERWATER
+     ============================================================ */
+  float seabedDepth(){ return mix(-27.0, -12.0, uShallow); }
+
+  vec3 seabedColor(vec3 p){
+    vec2 q = p.xz;
+    float grain  = fbm(q * 0.55);
+    float ripple = sin(q.x * 1.7 + sin(q.y * 1.2) * 1.8) * 0.5 + 0.5;
+    vec3 sand = mix(vec3(0.40, 0.38, 0.30), vec3(0.88, 0.84, 0.70),
+                    clamp(grain * 0.65 + ripple * 0.35, 0.0, 1.0));
+
+    float weed = smoothstep(0.52, 0.80, fbm(q * 0.22 + 7.3));
+    sand = mix(sand, vec3(0.10, 0.24, 0.16), weed * 0.70);
+
+    float rocks = smoothstep(0.74, 0.90, fbm(q * 0.95 + 21.0));
+    sand = mix(sand, vec3(0.30, 0.32, 0.31), rocks * 0.55);
+
+    /* caustics are the surface pattern projected down the refracted sun */
+    vec3 s = p + SHAFT * ((0.0 - p.y) / SHAFT.y);
+    float c = getCaustics(s.xz * 0.38);
+    sand += vec3(1.0, 0.95, 0.80) * c * 1.15 * exp(p.y * 0.035);
+
+    return sand;
+  }
+
+  vec3 renderUnder(vec3 ro, vec3 rd){
+    float bedY = seabedDepth();
+    vec3 col;
+    float t;
+
+    if (rd.y > 0.035){
+      /* looking up at the underside: Snell's window and total internal reflection */
+      t = min(traceUnderside(ro, rd), 260.0);
+      vec3 p = ro + rd * t;
+      vec2 g;
+      waveField(p.xz, t, 10, g);
+      vec3 n  = normalize(vec3(-g.x, 1.0, -g.y));
+      vec3 nd = -n;
+
+      vec3 refr = refract(rd, nd, 1.333);
+      if (dot(refr, refr) > 1e-4){
+        col = sky(normalize(refr)) * 1.06;
+        float rim = 1.0 - clamp(dot(-rd, nd), 0.0, 1.0);
+        col += vec3(0.50, 0.86, 0.96) * pow(rim, 6.0) * 0.55;   // compressed horizon ring
+      } else {
+        vec3 rr = reflect(rd, nd);
+        float down = clamp(-rr.y, 0.0, 1.0);
+        col  = mix(vec3(0.03, 0.16, 0.24), vec3(0.16, 0.30, 0.28), down);
+        col += vec3(0.20, 0.45, 0.48) * getCaustics(p.xz * 0.45) * 0.35;
+      }
+      /* light dancing along the underside of the swell */
+      col += vec3(0.30, 0.60, 0.62) * getCaustics(p.xz * 0.55) * 0.30;
+
+    } else if (rd.y < -0.035){
+      float tb = (bedY - ro.y) / rd.y;
+      t = min(tb, 240.0);
+      col = (tb < 240.0) ? seabedColor(ro + rd * t) : vec3(0.02, 0.09, 0.14);
+
+    } else {
+      t = 200.0;
+      col = vec3(0.02, 0.09, 0.14);
+    }
+
+    /* Beer-Lambert absorption: red dies first, blue-green survives */
+    float td = min(t, 150.0);
+    vec3 absorbC = vec3(0.155, 0.045, 0.028);
+    vec3 ext = exp(-absorbC * td);
+    float midY = ro.y + rd.y * td * 0.5;
+    vec3 amb = vec3(0.045, 0.30, 0.42) * exp(clamp(midY, -70.0, 0.0) * 0.045);
+    col = col * ext + amb * (1.0 - ext);
+
+    /* volumetric god rays: march the view ray, project each sample up the
+       refracted sun direction and sample the same caustic pattern */
+    float shaft = 0.0;
+    float dith  = hash21(gl_FragCoord.xy * 0.37 + fract(uTime) * 91.0);
+    float segLen = min(td, 60.0) / 10.0;
+    for (int i = 0; i < 10; i++){
+      vec3 sp = ro + rd * (segLen * (float(i) + dith));
+      if (sp.y > -0.15) continue;
+      vec3 q = sp + SHAFT * ((0.0 - sp.y) / SHAFT.y);
+      shaft += getCaustics(q.xz * 0.22) * exp(sp.y * 0.05);
+    }
+    shaft /= 10.0;
+    float toSun = clamp(dot(rd, SHAFT), 0.0, 1.0);
+    col += vec3(0.42, 0.86, 0.98) * shaft * (0.55 + 1.35 * pow(toSun, 2.2)) * 1.25;
 
     return col;
   }
@@ -760,31 +1066,45 @@ a:focus-visible, button:focus-visible{
   void main(){
     vec2 uv = (gl_FragCoord.xy * 2.0 - uRes) / uRes.y;
 
-    // camera: drifting forward, gentle pointer parallax, pitches down on scroll
-    vec3 ro = vec3(uMouse.x * 1.6, 3.15 + uMouse.y * 0.35, -uTime * 0.85);
-    float pitch = -0.085 - uScroll * 0.055 + uMouse.y * 0.035;
+    float d    = clamp(uDive, 0.0, 1.0);
+    float sub  = smoothstep(0.30, 0.75, d);
+    float camY = 3.3 - 17.0 * d * d + sin(uTime * 0.42) * 0.16;
+
+    /* gentle refractive wobble once submerged */
+    uv += vec2(sin(uv.y * 7.0 + uTime * 0.9), cos(uv.x * 6.0 + uTime * 0.75)) * 0.0045 * sub;
+
+    vec3 ro = vec3(uMouse.x * 1.6 + sin(uTime * 0.23) * 0.6 * sub,
+                   camY + uMouse.y * 0.35,
+                   -uTime * 0.78);
+
+    float pitch = mix(-0.085 - uScroll * 0.02, 0.0, smoothstep(0.0, 0.45, d))
+                + smoothstep(0.30, 0.62, d) * (1.0 - smoothstep(0.70, 1.0, d) * 0.66) * 0.30
+                + uMouse.y * 0.035;
+
     vec3 rd = normalize(vec3(uv.x, uv.y + pitch, -1.45));
 
     vec3 col;
-    vec3 p;
-    float t = traceOcean(ro, rd, p);
-
-    if (t < 0.0){
-      col = sky(rd);
+    if (ro.y < waveHeight(ro.xz, 5) - 0.02){
+      col = renderUnder(ro, rd);
     } else {
-      float dist = t;
-      vec2 g;
-      // High detail normal evaluation. The internal LOD check ensures that 
-      // frequencies smaller than a pixel are discarded mathematically, avoiding aliasing.
-      waveField(p.xz, dist, 14, g);
-      vec3 n = normalize(vec3(-g.x, 1.0, -g.y));
-      col = shadeOcean(p, rd, n, dist);
+      vec3 p;
+      float t = traceOcean(ro, rd, p);
+      if (t < 0.0){
+        col = sky(rd);
+      } else {
+        vec2 g;
+        waveField(p.xz, t, 14, g);
+        vec3 n = normalize(vec3(-g.x, 1.0, -g.y));
+        col = shadeOcean(p, rd, n, t);
+      }
     }
 
-    // HDR Exposure and Gamma 
-    col = 1.0 - exp(-col * 1.28);
+    /* HDR exposure, gamma, saturation, plus an underwater vignette */
+    float expo = mix(1.28, 1.58, sub);
+    col = 1.0 - exp(-col * expo);
     col = pow(col, vec3(0.86));
-    col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, 1.12); // saturation
+    col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, mix(1.12, 1.04, sub));
+    col *= 1.0 - 0.45 * sub * smoothstep(0.55, 1.85, length(uv));
 
     fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
   }`;
@@ -821,11 +1141,12 @@ a:focus-visible, button:focus-visible{
     mouse:   gl.getUniformLocation(prog, 'uMouse'),
     scroll:  gl.getUniformLocation(prog, 'uScroll'),
     chop:    gl.getUniformLocation(prog, 'uChop'),
-    shallow: gl.getUniformLocation(prog, 'uShallow')
+    shallow: gl.getUniformLocation(prog, 'uShallow'),
+    dive:    gl.getUniformLocation(prog, 'uDive')
   };
 
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let scale = window.innerWidth > 1500 ? 0.72 : 0.85; 
+  let scale = window.innerWidth > 1500 ? 0.72 : 0.85;
   let chop = 1.0, target = { x: 0, y: 0 }, mouse = { x: 0, y: 0 };
   let shallowTarget = 0.0, shallowCurrent = 0.0;
   let scroll = 0, clock = 0, last = performance.now();
@@ -848,6 +1169,7 @@ a:focus-visible, button:focus-visible{
     gl.uniform1f(U.scroll, scroll);
     gl.uniform1f(U.chop, chop);
     gl.uniform1f(U.shallow, shallowCurrent);
+    gl.uniform1f(U.dive, Dive.value);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -863,9 +1185,10 @@ a:focus-visible, button:focus-visible{
 
     mouse.x += (target.x - mouse.x) * 0.045;
     mouse.y += (target.y - mouse.y) * 0.045;
-    scroll += (window.scrollY / window.innerHeight - scroll) * 0.08;
-    
-    // smooth blend between depth styles
+
+    const sTarget = Math.min(window.scrollY / Math.max(window.innerHeight, 1), 1.5);
+    scroll += (sTarget - scroll) * 0.08;
+
     shallowCurrent += (shallowTarget - shallowCurrent) * 0.04;
 
     draw();
@@ -885,6 +1208,9 @@ a:focus-visible, button:focus-visible{
     else if (!reduced && !paused){ running = true; last = performance.now(); requestAnimationFrame(frame); }
   });
 
+  /* when the animation loop is stopped, still repaint as the dive changes */
+  Dive.onUpdate(() => { if (!running) { scroll = Math.min(window.scrollY / Math.max(window.innerHeight,1), 1.5); draw(); } });
+
   if (reduced){ draw(); } else { requestAnimationFrame(frame); }
 
   /* ---- water controls ---- */
@@ -896,13 +1222,12 @@ a:focus-visible, button:focus-visible{
     if (group === 'play' && mode === 'pause'){
       paused = !paused;
       btn.setAttribute('aria-pressed', String(paused));
-      if (!paused && !running && !document.hidden){
+      if (!paused && !running && !document.hidden && !reduced){
         running = true; last = performance.now(); requestAnimationFrame(frame);
       }
       return;
     }
 
-    // Swap states within the appropriate button group
     document.querySelectorAll(`.sea-controls button[data-group="${group}"]`).forEach(b => {
       b.setAttribute('aria-pressed', String(b === btn));
     });
@@ -912,7 +1237,7 @@ a:focus-visible, button:focus-visible{
     } else if (group === 'depth') {
       shallowTarget = mode === 'shallow' ? 1.0 : 0.0;
     }
-    
+
     if (!running) draw();
   }));
 })();
@@ -924,21 +1249,125 @@ a:focus-visible, button:focus-visible{
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const host = document.getElementById('bubbles');
   const frag = document.createDocumentFragment();
-  for (let i = 0; i < 14; i++){
+  for (let i = 0; i < 22; i++){
     const b = document.createElement('b');
-    const size = 8 + Math.random() * 46;
+    const size = 6 + Math.random() * 44;
     b.style.width = b.style.height = size + 'px';
     b.style.left = (Math.random() * 100) + 'vw';
-    b.style.setProperty('--drift', (Math.random() * 120 - 60) + 'px');
-    b.style.animationDuration = (16 + Math.random() * 20) + 's';
+    b.style.setProperty('--drift', (Math.random() * 140 - 70) + 'px');
+    b.style.animationDuration = (11 + Math.random() * 18) + 's';
     b.style.animationDelay = (-Math.random() * 30) + 's';
+    b.style.opacity = '';
     frag.appendChild(b);
   }
   host.appendChild(frag);
 })();
 
 /* ============================================================
-   3. Sidebar gadget: validation-loss sparkline (Canvas 2D)
+   3. Marine life: fish, a school, jellyfish, marine snow
+   ============================================================ */
+(function () {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const host = document.getElementById('marine');
+  if (!host) return;
+
+  const frag = document.createDocumentFragment();
+  const fishColors  = ['#ffb347','#ff8a5c','#6fd3f5','#f7d154','#8fe07a','#ff9ec4','#59b7e8','#c3a6ff'];
+  const jellyColors = ['#9fe8ff','#ffc7e8','#c7f0d8'];
+  const rnd = (a, b) => a + Math.random() * (b - a);
+
+  function fishSVG(size, colour, dir){
+    return `<svg class="fish" viewBox="0 0 100 60" width="${size}" height="${size * 0.6}"
+            style="color:${colour};transform:scaleX(${dir})" aria-hidden="true"><use href="#fishShape"/></svg>`;
+  }
+
+  /* solo fish at assorted distances */
+  for (let i = 0; i < 7; i++){
+    const depth = Math.random();                     // 0 = far, 1 = close
+    const size  = 34 + depth * 120;
+    const dir   = Math.random() < 0.5 ? 1 : -1;
+    const wrap  = document.createElement('div');
+    wrap.className = 'swim' + (dir < 0 ? ' rev' : '');
+    wrap.style.top = rnd(8, 88) + 'vh';
+    wrap.style.animationDuration = (52 - depth * 20 + Math.random() * 18) + 's';
+    wrap.style.animationDelay = (-Math.random() * 60) + 's';
+    wrap.style.opacity = (0.32 + depth * 0.6).toFixed(2);
+    if (depth < 0.45) wrap.style.filter = 'blur(1.6px)';
+
+    const lean = document.createElement('div');
+    lean.className = 'lean';
+    lean.style.animationDuration = rnd(2.2, 4.4) + 's';
+    lean.style.animationDelay = (-Math.random() * 4) + 's';
+    lean.innerHTML = fishSVG(size, fishColors[i % fishColors.length], dir);
+    wrap.appendChild(lean);
+    frag.appendChild(wrap);
+  }
+
+  /* two small schools that travel together */
+  for (let s = 0; s < 2; s++){
+    const dir  = s === 0 ? 1 : -1;
+    const wrap = document.createElement('div');
+    wrap.className = 'swim' + (dir < 0 ? ' rev' : '');
+    wrap.style.top = rnd(22, 70) + 'vh';
+    wrap.style.animationDuration = rnd(40, 58) + 's';
+    wrap.style.animationDelay = (-Math.random() * 50) + 's';
+    wrap.style.opacity = '0.75';
+    const colour = fishColors[(s * 3 + 1) % fishColors.length];
+
+    for (let i = 0; i < 9; i++){
+      const lean = document.createElement('div');
+      lean.className = 'lean';
+      lean.style.position = 'absolute';
+      lean.style.left = (i % 3) * 46 + rnd(-8, 8) + 'px';
+      lean.style.top  = Math.floor(i / 3) * 34 + rnd(-8, 8) + 'px';
+      lean.style.animationDuration = rnd(1.6, 3.0) + 's';
+      lean.style.animationDelay = (-Math.random() * 3) + 's';
+      lean.innerHTML = fishSVG(rnd(24, 34), colour, dir);
+      wrap.appendChild(lean);
+    }
+    frag.appendChild(wrap);
+  }
+
+  /* drifting jellyfish */
+  for (let i = 0; i < 3; i++){
+    const wrap = document.createElement('div');
+    wrap.className = 'float';
+    wrap.style.left = rnd(6, 88) + 'vw';
+    wrap.style.setProperty('--drift', rnd(-70, 70) + 'px');
+    wrap.style.animationDuration = rnd(46, 74) + 's';
+    wrap.style.animationDelay = (-Math.random() * 60) + 's';
+    wrap.style.opacity = rnd(0.45, 0.85).toFixed(2);
+
+    const pulse = document.createElement('div');
+    pulse.className = 'pulse';
+    pulse.style.animationDuration = rnd(2.0, 3.2) + 's';
+    const size = rnd(40, 78);
+    pulse.innerHTML = `<svg class="jelly" viewBox="0 0 80 112" width="${size}" height="${size * 1.4}"
+      style="color:${jellyColors[i % jellyColors.length]}" aria-hidden="true"><use href="#jellyShape"/></svg>`;
+    wrap.appendChild(pulse);
+    frag.appendChild(wrap);
+  }
+
+  /* marine snow */
+  const snow = document.createElement('div');
+  snow.className = 'snow';
+  for (let i = 0; i < 34; i++){
+    const b = document.createElement('b');
+    const size = rnd(1.5, 4.5);
+    b.style.width = b.style.height = size + 'px';
+    b.style.left = rnd(0, 100) + 'vw';
+    b.style.setProperty('--drift', rnd(-40, 40) + 'px');
+    b.style.animationDuration = rnd(26, 60) + 's';
+    b.style.animationDelay = (-Math.random() * 60) + 's';
+    snow.appendChild(b);
+  }
+  frag.appendChild(snow);
+
+  host.appendChild(frag);
+})();
+
+/* ============================================================
+   4. Sidebar gadget: validation-loss sparkline (Canvas 2D)
    ============================================================ */
 (function () {
   const c = document.getElementById('spark');
@@ -949,6 +1378,7 @@ a:focus-visible, button:focus-visible{
   function render(){
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = c.clientWidth, h = c.clientHeight;
+    if (!w || !h) return;
     c.width = w * dpr; c.height = h * dpr;
     const ctx = c.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -968,14 +1398,15 @@ a:focus-visible, button:focus-visible{
       ctx.beginPath(); ctx.moveTo(padX, y); ctx.lineTo(w - padX, y); ctx.stroke();
     }
 
-    ctx.beginPath();
-    loss.forEach((_, i) => { const [x, y] = pt(i); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-    const line = ctx.getImageData ? ctx.createLinearGradient(0, 0, w, 0) : null;
+    const line = ctx.createLinearGradient(0, 0, w, 0);
     line.addColorStop(0, '#0a6fb0'); line.addColorStop(1, '#3fc0f0');
 
     const area = ctx.createLinearGradient(0, 0, 0, h);
     area.addColorStop(0, 'rgba(63,192,240,.42)');
     area.addColorStop(1, 'rgba(63,192,240,0)');
+
+    ctx.beginPath();
+    loss.forEach((_, i) => { const [x, y] = pt(i); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.save();
     ctx.lineTo(w - padX, h - padY); ctx.lineTo(padX, h - padY); ctx.closePath();
     ctx.fillStyle = area; ctx.fill();
