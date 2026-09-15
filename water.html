@@ -32,7 +32,7 @@ body{
   min-height:100%;
   font:400 16px/1.65 "Segoe UI","Frutiger","Frutiger Linotype",Tahoma,Verdana,Geneva,sans-serif;
   color:var(--ink);
-  background:#0d4f7d;           /* shows if the canvas is still warming up */
+  background:#0d4f7d;
   -webkit-font-smoothing:antialiased;
   overflow-x:hidden;
 }
@@ -292,7 +292,7 @@ footer a{color:#fff}
 /* ---------- water controls ---------- */
 .sea-controls{
   position:fixed; right:16px; bottom:16px; z-index:30;
-  display:flex; gap:6px; padding:6px; border-radius:999px;
+  display:flex; align-items:center; gap:6px; padding:6px; border-radius:999px;
 }
 .sea-controls button{
   cursor:pointer; font:600 12.5px/1 "Segoe UI",Tahoma,sans-serif;
@@ -305,6 +305,11 @@ footer a{color:#fff}
   color:#fff;
   background:linear-gradient(180deg,#7fd3ff,#1f9ce0 48%,#0b6fb4 52%,#09609c);
   text-shadow:0 -1px 0 rgba(4,56,94,.5);
+}
+.sea-controls .divider {
+  width:1px; height:20px;
+  background:linear-gradient(180deg, rgba(255,255,255,0), rgba(8,74,122,.2) 50%, rgba(255,255,255,0));
+  margin:0 2px;
 }
 
 /* ---------- a11y ---------- */
@@ -322,6 +327,7 @@ a:focus-visible, button:focus-visible{
   .split{grid-template-columns:1fr}
   .about{grid-template-columns:1fr}
   nav.bar-nav{width:100%; margin-left:0}
+  .sea-controls {flex-wrap:wrap; max-width: 280px; justify-content: center;}
 }
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
@@ -490,14 +496,18 @@ a:focus-visible, button:focus-visible{
 </footer>
 
 <div class="sea-controls glass" role="group" aria-label="Water controls">
-  <button type="button" data-sea="calm" aria-pressed="false">Calm</button>
-  <button type="button" data-sea="choppy" aria-pressed="true">Choppy</button>
-  <button type="button" data-sea="pause" aria-pressed="false">Pause</button>
+  <button type="button" data-group="chop" data-sea="calm" aria-pressed="false">Calm</button>
+  <button type="button" data-group="chop" data-sea="choppy" aria-pressed="true">Choppy</button>
+  <div class="divider"></div>
+  <button type="button" data-group="depth" data-sea="deep" aria-pressed="true">Deep</button>
+  <button type="button" data-group="depth" data-sea="shallow" aria-pressed="false">Shallow</button>
+  <div class="divider"></div>
+  <button type="button" data-group="play" data-sea="pause" aria-pressed="false">Pause</button>
 </div>
 
 <script>
 /* ============================================================
-   1. THE OCEAN — WebGL2, procedural, no textures, no libraries
+   1. THE OCEAN — WebGL2, procedural, realistic multi-pass lighting
    ============================================================ */
 (function () {
   const canvas = document.getElementById('sea');
@@ -515,26 +525,29 @@ a:focus-visible, button:focus-visible{
     gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
   }`;
 
-  /* ---- fragment: sky, clouds, sun, and a raymarched wave height field ---- */
+  /* ---- fragment: sky, sum of sines wave field, and realistic shading ---- */
   const FRAG = `#version 300 es
   precision highp float;
 
   uniform vec2  uRes;
   uniform float uTime;
-  uniform vec2  uMouse;    // -1..1 pointer parallax
-  uniform float uScroll;   // pages scrolled
+  uniform vec2  uMouse;
+  uniform float uScroll;
   uniform float uChop;     // 0.55 calm .. 1.0 choppy
+  uniform float uShallow;  // 0.0 deep ocean .. 1.0 shallow refractive reef
 
   out vec4 fragColor;
 
   #define SUN normalize(vec3(0.34, 0.20, -0.92))
 
-  /* ---------- value noise ---------- */
-  float hash21(vec2 p){
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
+  /* ---------- noise functions ---------- */
+  // High quality hash to avoid repeating diagonal/grid artifacts on older GPUs
+  float hash21(vec2 p) {
+    vec3 p3  = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
   }
+
   float vnoise(vec2 p){
     vec2 i = floor(p), f = fract(p);
     vec2 u = f * f * (3.0 - 2.0 * f);
@@ -552,40 +565,52 @@ a:focus-visible, button:focus-visible{
   }
 
   /* ---------- wave field ----------
-     A sum of directional waves, each rotated by the golden angle so the
-     spectrum never repeats. sin() is pushed through exp() to sharpen the
-     crests and flatten the troughs the way real wind waves behave, and each
-     octave warps the domain of the next one to give the surface its chop.
-     The analytic gradient falls straight out of the chain rule, so normals
-     cost nothing extra.                                                    */
-  float waveField(vec2 p, int octaves, out vec2 grad){
+     Sum of sines, pushed through exp() to sharpen crests. 
+     Uses Continuous Screen-Space LOD to fade out sub-pixel waves and eliminate spatial aliasing/moire grids. */
+  float waveField(vec2 p, float dist, int max_octaves, out vec2 grad){
     float h = 0.0;
     grad = vec2(0.0);
     float amp = 0.62, freq = 0.30, speed = 1.0, k = 1.60 * uChop;
     float ang = 0.0;
     vec2 warp = vec2(0.0);
 
-    for (int i = 0; i < 12; i++){
-      if (i >= octaves) break;
-      ang += 2.39996;                               // golden angle
+    // Approximate size of a pixel footprint at this world distance
+    float pixel_width = max(dist * 0.0025, 0.001); 
+
+    for (int i = 0; i < 14; i++){
+      if (i >= max_octaves) break; // Hard limit for raymarching performance
+
+      float wave_width = 1.0 / freq;
+      // Smoothly fade out the mathematical effect of waves smaller than ~2 pixels wide.
+      // This is the mathematical key to removing the hash/grid moire artifact in the distance.
+      float lod = smoothstep(pixel_width, pixel_width * 3.0, wave_width);
+      if (lod < 0.001) break;
+
+      ang += 2.39996;                               // golden angle offset
       vec2 d = vec2(cos(ang), sin(ang));
       float ph = dot(p + warp, d) * freq + uTime * speed * freq * 2.4;
+      
       float s  = sin(ph);
       float w  = exp(k * s - k);                    // sharp crest, flat trough
       float dw = k * cos(ph) * w;
 
-      h    += amp * w;
-      grad += amp * dw * freq * d;
-      warp += d * w * amp * 0.38;
+      // Apply lod suppression directly to the wave height and its derivative gradient
+      h    += amp * w * lod;
+      grad += amp * dw * freq * d * lod;
+      warp += d * w * amp * 0.38 * lod;             // domain warp based on prev wave
 
       amp *= 0.66; freq *= 1.79; speed *= 1.06; k *= 0.93;
     }
     grad *= 0.80;
     return h * 0.80 - 0.55;
   }
-  float waveHeight(vec2 p, int octaves){
+
+  /* Fixed low-detail height field exclusively for finding the intersection */
+  float waveHeight(vec2 p, int max_octaves){
     vec2 g;
-    return waveField(p, octaves, g);
+    // Pass distance as 0.0 to ignore LOD fading during the intersection search.
+    // This keeps the curve uniform and prevents the secant method from oscillating.
+    return waveField(p, 0.0, max_octaves, g); 
   }
 
   /* ---------- sky ---------- */
@@ -596,7 +621,7 @@ a:focus-visible, button:focus-visible{
     vec3 col = mix(horizon, zenith, pow(clamp(y, 0.0, 1.0), 0.60));
 
     float sd = max(dot(rd, SUN), 0.0);
-    col += vec3(1.00, 0.88, 0.66) * pow(sd, 1200.0) * 14.0;   // disc
+    col += vec3(1.00, 0.88, 0.66) * pow(sd, 1200.0) * 14.0;   // sun disc
     col += vec3(1.00, 0.80, 0.52) * pow(sd, 22.0)   * 0.38;   // glow
     col += vec3(0.95, 0.80, 0.60) * pow(sd, 3.0)    * 0.06;   // wide haze
 
@@ -607,20 +632,27 @@ a:focus-visible, button:focus-visible{
       f = smoothstep(0.40, 0.92, f);
       float band = smoothstep(0.0, 0.26, rd.y);
       vec3 cloud = mix(vec3(0.74, 0.83, 0.93), vec3(1.0), smoothstep(0.2, 1.0, f));
-      cloud += vec3(1.0, 0.90, 0.72) * pow(sd, 8.0) * 0.30;    // silver lining
+      cloud += vec3(1.0, 0.90, 0.72) * pow(sd, 8.0) * 0.30;
       col = mix(col, cloud, f * band * 0.94);
     }
     return col;
   }
 
-  /* ---------- ray / height-field intersection by secant search ---------- */
+  /* ---------- ray marching ---------- */
   float traceOcean(vec3 ro, vec3 rd, out vec3 hitP){
     float tn = 0.0, tf = 300.0;
-    float dF = (ro.y + rd.y * tf) - waveHeight((ro + rd * tf).xz, 3);
-    if (dF > 0.0) return -1.0;                       // ray escapes to the sky
-    float dN = ro.y - waveHeight(ro.xz, 3);
-    float tm = tn;
+    
+    // Quick exit if ray is looking at the sky above the water
+    if (rd.y > 0.01 && ro.y > 0.5) return -1.0; 
 
+    // Find bounding intersection
+    float tm = tn;
+    float dN = ro.y - waveHeight(ro.xz, 5);
+    float dF = (ro.y + rd.y * tf) - waveHeight((ro + rd * tf).xz, 5);
+    
+    if (dF > 0.0) return -1.0; // ray escapes completely
+
+    // Secant root finding iteration against a low-resolution geometric mesh
     for (int i = 0; i < 11; i++){
       tm = mix(tn, tf, dN / (dN - dF));
       vec3 p = ro + rd * tm;
@@ -631,35 +663,97 @@ a:focus-visible, button:focus-visible{
     return tm;
   }
 
-  /* ---------- water shading ---------- */
+  /* ---------- refractive caustics ---------- */
+  float getCaustics(vec2 uv) {
+    uv *= 1.5;
+    float t = uTime * 0.7;
+    vec2 p = uv;
+    float c = 0.0;
+    for (int i = 0; i < 3; i++) {
+      p = p + vec2(cos(t - p.x), sin(t + p.y));
+      c += sin(p.x) * cos(p.y);
+    }
+    return pow(clamp(c * 0.5 + 0.5, 0.0, 1.0), 4.0);
+  }
+
+  /* ---------- realistic multi-pass water shading ---------- */
   vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
+    // 1. Reflected Sky
     vec3 refl = reflect(rd, n);
     refl.y = max(refl.y, 0.015);
     vec3 skyCol = sky(refl);
 
-    float fres = pow(1.0 - clamp(dot(-rd, n), 0.0, 1.0), 5.0);
-    fres = clamp(mix(0.025, 1.0, fres), 0.0, 1.0);
+    // 2. Fresnel (Schlick's approx)
+    float f0 = 0.02;
+    float fres = f0 + (1.0 - f0) * pow(clamp(1.0 - dot(-rd, n), 0.0, 1.0), 5.0);
 
+    // 3. Base Color & Translucency
     float crest = clamp(p.y * 0.95 + 0.45, 0.0, 1.0);
-    vec3 deep    = vec3(0.012, 0.135, 0.245);
-    vec3 shallow = vec3(0.055, 0.520, 0.590);
-    vec3 body = mix(deep, shallow, crest);
 
-    // wrap-lit subsurface scattering: thin crests glow green when backlit
-    float sss = pow(clamp(dot(n, SUN) * 0.5 + 0.5, 0.0, 1.0), 2.0) * crest;
-    body += vec3(0.14, 0.52, 0.40) * sss * 0.65;
+    // --- Mode A: Deep Volumetric Ocean ---
+    vec3 deepD    = vec3(0.005, 0.080, 0.180);
+    vec3 shallowD = vec3(0.030, 0.350, 0.480);
+    vec3 bodyDeep = mix(deepD, shallowD, crest);
+    // Wrap-lit subsurface scattering inside thick waves
+    float sss = pow(clamp(dot(n, SUN) * 0.5 + 0.5, 0.0, 1.0), 3.0) * crest;
+    bodyDeep += vec3(0.12, 0.45, 0.35) * sss * 0.8;
 
+    // --- Mode B: Shallow Reef (Refraction & Caustics) ---
+    vec3 rdRefr = refract(rd, n, 1.0 / 1.333); // Air to water IOR
+    float floorY = -1.6;
+    float tFloor = (floorY - p.y) / min(rdRefr.y, -0.01);
+    vec3 pFloor = p + rdRefr * tFloor;
+    
+    float caustics = getCaustics(pFloor.xz);
+    float sandRipples = sin(pFloor.x * 6.0 + sin(pFloor.z * 4.0)) * 0.05 + 0.95;
+    vec3 sand = vec3(0.85, 0.80, 0.65) * sandRipples;
+    vec3 floorC = sand + vec3(1.0, 0.95, 0.8) * caustics * 2.0;
+
+    float depthWalk = max(tFloor, 0.0);
+    // Beer's Law for water absorption (rapidly drops red, retains blue/green)
+    vec3 extinction = exp(-vec3(0.8, 0.25, 0.05) * depthWalk);
+    vec3 scatter = vec3(0.0, 0.4, 0.5) * (1.0 - extinction) * 0.3;
+    vec3 bodyShallow = floorC * extinction + scatter;
+
+    // Blend approaches based on UI state
+    vec3 body = mix(bodyDeep, bodyShallow, uShallow);
+
+    // 4. Sun Shimmer / Micro-facets
     vec3 hv = normalize(SUN - rd);
-    float spec = pow(clamp(dot(n, hv), 0.0, 1.0), 1100.0) * 7.0;
+    // Broad, standard specular
+    float specMain = pow(clamp(dot(n, hv), 0.0, 1.0), 400.0) * 3.0;
+    
+    // Smoothly fade out the expensive micro-facet noise based on distance to prevent far-plane hash flickering
+    float microFade = smoothstep(50.0, 10.0, dist);
+    float spec = specMain;
+    
+    if (microFade > 0.01) {
+      // Rotation matrix to deliberately skew the value noise and hide lattice alignments
+      mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
+      vec2 microUV = p.xz * 12.0 - uTime * 0.3;
+      float micro = vnoise(rot * microUV) * 0.5 + 0.5;
+      
+      // Perturb normal to create high-frequency micro glints
+      vec3 nGlint = normalize(n + vec3(micro * 0.15, 0.0, micro * 0.15) * microFade);
+      float specGlint = pow(clamp(dot(nGlint, hv), 0.0, 1.0), 1500.0) * (8.0 * microFade);
+      spec += specGlint;
+    }
 
-    vec3 col = mix(body, skyCol, fres) + vec3(1.0, 0.93, 0.80) * spec;
-
+    // 5. Foam (Organic noise-driven)
     float steep = 1.0 - n.y;
-    float foam = smoothstep(0.10, 0.34, steep) * smoothstep(0.30, 0.85, crest);
-    col = mix(col, vec3(0.93, 0.98, 1.0), foam * 0.32 * uChop);
+    mat2 foamRot = mat2(0.8, -0.6, 0.6, 0.8);
+    float foamNoise = vnoise(foamRot * (p.xz * 3.5 + uTime * 0.4));
+    float foam = smoothstep(0.15, 0.35, steep) * smoothstep(0.20, 0.85, crest) * (foamNoise * 0.8 + 0.2);
 
-    float fog = 1.0 - exp(-dist * 0.0060);
+    // Combine
+    vec3 col = mix(body, skyCol, fres);
+    col += vec3(1.0, 0.95, 0.85) * spec;
+    col = mix(col, vec3(0.9, 0.95, 1.0), foam * 0.5 * uChop);
+
+    // 6. Fog
+    float fog = 1.0 - exp(-dist * 0.0035);
     col = mix(col, sky(vec3(rd.x, 0.004, rd.z)), fog);
+
     return col;
   }
 
@@ -679,16 +773,18 @@ a:focus-visible, button:focus-visible{
       col = sky(rd);
     } else {
       float dist = t;
-      int oct = int(mix(10.0, 4.0, clamp(dist / 95.0, 0.0, 1.0)));
       vec2 g;
-      waveField(p.xz, oct, g);
+      // High detail normal evaluation. The internal LOD check ensures that 
+      // frequencies smaller than a pixel are discarded mathematically, avoiding aliasing.
+      waveField(p.xz, dist, 14, g);
       vec3 n = normalize(vec3(-g.x, 1.0, -g.y));
       col = shadeOcean(p, rd, n, dist);
     }
 
-    col = 1.0 - exp(-col * 1.28);        // exposure
-    col = pow(col, vec3(0.86));          // lift midtones, keep it vivid
-    col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, 1.12); // saturate
+    // HDR Exposure and Gamma 
+    col = 1.0 - exp(-col * 1.28);
+    col = pow(col, vec3(0.86));
+    col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, 1.12); // saturation
 
     fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
   }`;
@@ -717,19 +813,21 @@ a:focus-visible, button:focus-visible{
     return;
   }
   gl.useProgram(prog);
-  gl.bindVertexArray(gl.createVertexArray());   // some drivers need a bound VAO
+  gl.bindVertexArray(gl.createVertexArray());
 
   const U = {
-    res:    gl.getUniformLocation(prog, 'uRes'),
-    time:   gl.getUniformLocation(prog, 'uTime'),
-    mouse:  gl.getUniformLocation(prog, 'uMouse'),
-    scroll: gl.getUniformLocation(prog, 'uScroll'),
-    chop:   gl.getUniformLocation(prog, 'uChop')
+    res:     gl.getUniformLocation(prog, 'uRes'),
+    time:    gl.getUniformLocation(prog, 'uTime'),
+    mouse:   gl.getUniformLocation(prog, 'uMouse'),
+    scroll:  gl.getUniformLocation(prog, 'uScroll'),
+    chop:    gl.getUniformLocation(prog, 'uChop'),
+    shallow: gl.getUniformLocation(prog, 'uShallow')
   };
 
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let scale = window.innerWidth > 1500 ? 0.72 : 0.85;   // render below native, upscale
+  let scale = window.innerWidth > 1500 ? 0.72 : 0.85; 
   let chop = 1.0, target = { x: 0, y: 0 }, mouse = { x: 0, y: 0 };
+  let shallowTarget = 0.0, shallowCurrent = 0.0;
   let scroll = 0, clock = 0, last = performance.now();
   let running = !reduced, paused = false;
 
@@ -749,10 +847,10 @@ a:focus-visible, button:focus-visible{
     gl.uniform2f(U.mouse, mouse.x, mouse.y);
     gl.uniform1f(U.scroll, scroll);
     gl.uniform1f(U.chop, chop);
+    gl.uniform1f(U.shallow, shallowCurrent);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  // rough frame-time watchdog: drop resolution once if we're clearly struggling
   let slow = 0, downshifted = false;
 
   function frame(now){
@@ -766,6 +864,9 @@ a:focus-visible, button:focus-visible{
     mouse.x += (target.x - mouse.x) * 0.045;
     mouse.y += (target.y - mouse.y) * 0.045;
     scroll += (window.scrollY / window.innerHeight - scroll) * 0.08;
+    
+    // smooth blend between depth styles
+    shallowCurrent += (shallowTarget - shallowCurrent) * 0.04;
 
     draw();
     if (running) requestAnimationFrame(frame);
@@ -788,12 +889,11 @@ a:focus-visible, button:focus-visible{
 
   /* ---- water controls ---- */
   const buttons = document.querySelectorAll('.sea-controls button');
-  function setPressed(mode){
-    buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.sea === mode)));
-  }
   buttons.forEach(btn => btn.addEventListener('click', () => {
     const mode = btn.dataset.sea;
-    if (mode === 'pause'){
+    const group = btn.dataset.group;
+
+    if (group === 'play' && mode === 'pause'){
       paused = !paused;
       btn.setAttribute('aria-pressed', String(paused));
       if (!paused && !running && !document.hidden){
@@ -801,8 +901,18 @@ a:focus-visible, button:focus-visible{
       }
       return;
     }
-    chop = mode === 'calm' ? 0.55 : 1.0;
-    setPressed(mode);
+
+    // Swap states within the appropriate button group
+    document.querySelectorAll(`.sea-controls button[data-group="${group}"]`).forEach(b => {
+      b.setAttribute('aria-pressed', String(b === btn));
+    });
+
+    if (group === 'chop') {
+      chop = mode === 'calm' ? 0.55 : 1.0;
+    } else if (group === 'depth') {
+      shallowTarget = mode === 'shallow' ? 1.0 : 0.0;
+    }
+    
     if (!running) draw();
   }));
 })();
