@@ -479,31 +479,38 @@ export function initOcean() {
 
   if (reduced){ draw(); } else { requestAnimationFrame(frame); }
 
-  /* ---- water controls ---- */
-  const buttons = document.querySelectorAll('.sea-controls button');
-  buttons.forEach(btn => btn.addEventListener('click', () => {
-    const mode = btn.dataset.sea;
-    const group = btn.dataset.group;
+  /* ---- water controls (sliders & play/pause) ---- */
+  const ctrlChop = document.getElementById('ctrl-chop');
+  const ctrlShallow = document.getElementById('ctrl-shallow');
+  const ctrlPlay = document.getElementById('ctrl-play');
 
-    if (group === 'play' && mode === 'pause'){
-      paused = !paused;
-      btn.setAttribute('aria-pressed', String(paused));
-      if (!paused && !running && !document.hidden && !reduced){
-        running = true; last = performance.now(); requestAnimationFrame(frame);
-      }
-      return;
-    }
-
-    document.querySelectorAll(`.sea-controls button[data-group="${group}"]`).forEach(b => {
-      b.setAttribute('aria-pressed', String(b === btn));
+  if (ctrlChop) {
+    ctrlChop.addEventListener('input', (e) => {
+      chop = parseFloat(e.target.value) / 100;
+      if (!running || paused) draw();
     });
+  }
 
-    if (group === 'chop') {
-      chop = mode === 'calm' ? 0.55 : 1.0;
-    } else if (group === 'depth') {
-      shallowTarget = mode === 'shallow' ? 1.0 : 0.0;
-    }
+  if (ctrlShallow) {
+    ctrlShallow.addEventListener('input', (e) => {
+      shallowTarget = parseFloat(e.target.value) / 100;
+      if (!running || paused) {
+        shallowCurrent = shallowTarget; // snap immediately if not rendering loop
+        draw();
+      }
+    });
+  }
 
-    if (!running) draw();
-  }));
+  if (ctrlPlay) {
+    ctrlPlay.addEventListener('click', () => {
+      paused = !paused;
+      ctrlPlay.setAttribute('aria-pressed', String(paused));
+      ctrlPlay.textContent = paused ? 'Resume Animation' : 'Pause Animation';
+      if (!paused && !running && !document.hidden && !reduced) {
+        running = true;
+        last = performance.now();
+        requestAnimationFrame(frame);
+      }
+    });
+  }
 }

@@ -169,16 +169,23 @@
   <div class="shell">Built from scratch — the swell you started on and the water you're in now are one WebGL shader, no images or libraries. <a href="#top">Back to the surface</a></div>
 </footer>
 
-<div class="sea-controls glass" role="group" aria-label="Water controls">
-  <button type="button" data-group="chop" data-sea="calm" aria-pressed="false">Calm</button>
-  <button type="button" data-group="chop" data-sea="choppy" aria-pressed="true">Choppy</button>
-  <div class="divider"></div>
-  <button type="button" data-group="depth" data-sea="deep" aria-pressed="true">Deep</button>
-  <button type="button" data-group="depth" data-sea="shallow" aria-pressed="false">Shallow</button>
-  <div class="divider"></div>
-  <button type="button" data-group="play" data-sea="pause" aria-pressed="false">Pause</button>
-  <div class="divider"></div>
-  <span class="gauge" aria-hidden="true"><span class="dot"></span><span id="depth">Surface</span></span>
+<div class="sea-controls" role="group" aria-label="Water controls">
+  <div class="sea-panel glass">
+    <label>
+      <span>Wave Height</span>
+      <input type="range" id="ctrl-chop" min="0" max="150" value="100">
+    </label>
+    <label>
+      <span>Reef Proximity</span>
+      <input type="range" id="ctrl-shallow" min="0" max="100" value="0">
+    </label>
+    <button type="button" id="ctrl-play" class="panel-btn" aria-pressed="false">Pause Animation</button>
+  </div>
+  <div class="sea-status glass" tabindex="0">
+    <span class="gauge" aria-hidden="true"><span class="dot"></span><span id="depth">Surface</span></span>
+    <div class="divider"></div>
+    <span class="settings-hint">Settings</span>
+  </div>
 </div>
 
 <script type="module" src="./scripts/main.js"></script>
