@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alex Rivera — Data Science Portfolio</title>
+<meta name="description" content="Data science portfolio: forecasting, remote sensing, anomaly detection and retrieval projects.">
+<link rel="stylesheet" href="./styles/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<canvas id="sea" aria-hidden="true"></canvas>
+<div class="atmosphere" aria-hidden="true"></div>
+<div class="caustics" aria-hidden="true"></div>
+<div class="bubbles" id="bubbles" aria-hidden="true"></div>
+<div class="splash" id="splash" aria-hidden="true"></div>
+
+<header class="bar">
+  <div class="shell">
+    <div class="bar-inner glass">
+      <a class="mark" href="#top"><span class="orb"></span>Alex Rivera</a>
+      <nav class="bar-nav">
+        <a href="#work">Work</a>
+        <a href="#toolkit">Toolkit</a>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+      </nav>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <div class="shell" id="top">
+
+    <section class="hero">
+      <p class="eyebrow">Data science, BSc — final year</p>
+      <h1>I turn messy sensor data into things people can act on.
+        <em>Four projects on forecasting, satellite imagery, anomaly detection and search — with the code and the numbers behind them.</em></h1>
+      <div class="cta-row">
+        <a class="btn" href="#work">See the projects</a>
+        <a class="btn ghost" href="#contact">Get in touch</a>
+      </div>
+      <a class="dive-hint" href="#work"><span class="chev"></span>Scroll to dive</a>
+    </section>
+
+    <section id="work">
+      <div class="panel glass">
+        <div class="section-head">
+          <h2>Selected work</h2>
+          <span>2024 – 2026</span>
+        </div>
+        <p class="lede">Coursework, a research assistantship and two things I built because the data was sitting there. Every result below comes from a held-out test set, not the split I tuned on.</p>
+
+        <div class="work">
+          <article class="card glass">
+            <h3>Bus arrival forecasting from live GPS feeds</h3>
+            <p>Ingested a year of city transit pings, rebuilt each trip's progress along its route, and predicted arrival time at the next four stops. Gradient boosting on trip-so-far features beat the agency's static timetable, especially in the evening peak.</p>
+            <span class="result">Mean absolute error 2.4 min, down from 5.1</span>
+            <div class="chips"><b>Python</b><b>LightGBM</b><b>DuckDB</b><b>GeoPandas</b></div>
+          </article>
+
+          <article class="card glass">
+            <h3>Coral bleaching detection in satellite tiles</h3>
+            <p>Fine-tuned a small ResNet on Sentinel-2 reef imagery with a reviewed label set of 3,800 tiles. Cloud and sun-glint tiles were the main failure mode, so I added a masking step before inference and reported per-reef accuracy rather than a single global score.</p>
+            <span class="result">F1 0.87 on unseen reefs</span>
+            <div class="chips"><b>PyTorch</b><b>Sentinel-2</b><b>rasterio</b><b>Weights &amp; Biases</b></div>
+          </article>
+
+          <article class="card glass">
+            <h3>Campus energy anomaly monitor</h3>
+            <p>Half-hourly meter readings from 14 buildings, decomposed into seasonal and residual components, with residuals scored for outliers. Facilities now get a Monday digest; the first month surfaced a chiller running through two semester breaks.</p>
+            <span class="result">31 flagged events, 24 confirmed real</span>
+            <div class="chips"><b>statsmodels</b><b>scikit-learn</b><b>Airflow</b><b>Postgres</b></div>
+          </article>
+
+          <article class="card glass">
+            <h3>Search across four semesters of lecture notes</h3>
+            <p>A weekend project that stuck. Notes and slide text are chunked, embedded and served through a small local API, so I can ask a question in plain language and get the three passages that answer it. Evaluated against 120 questions I wrote myself.</p>
+            <span class="result">Recall@3 of 0.91</span>
+            <div class="chips"><b>sentence-transformers</b><b>FAISS</b><b>FastAPI</b><b>SQLite</b></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="toolkit">
+      <div class="split">
+        <div class="panel glass">
+          <div class="section-head"><h2>Toolkit</h2></div>
+          <p class="lede">Honest labels instead of percentages — this is what I reach for without looking things up, and what I'm still building.</p>
+          <div class="meters">
+            <div class="meter-row">
+              <span class="name">Python — pandas, NumPy, scikit-learn</span>
+              <span class="note">daily driver</span>
+              <span class="meter"><i style="width:92%"></i></span>
+            </div>
+            <div class="meter-row">
+              <span class="name">SQL — window functions, query tuning</span>
+              <span class="note">daily driver</span>
+              <span class="meter"><i style="width:86%"></i></span>
+            </div>
+            <div class="meter-row">
+              <span class="name">PyTorch — vision models, fine-tuning</span>
+              <span class="note">comfortable</span>
+              <span class="meter"><i class="blue" style="width:68%"></i></span>
+            </div>
+            <div class="meter-row">
+              <span class="name">R — ggplot2, tidymodels</span>
+              <span class="note">comfortable</span>
+              <span class="meter"><i class="blue" style="width:61%"></i></span>
+            </div>
+            <div class="meter-row">
+              <span class="name">Spark and dbt on real pipelines</span>
+              <span class="note">learning this term</span>
+              <span class="meter"><i class="blue" style="width:34%"></i></span>
+            </div>
+          </div>
+        </div>
+
+        <aside class="gadget glass">
+          <h3>Reef classifier, run 41</h3>
+          <p class="sub">Validation loss per epoch</p>
+          <canvas id="spark" aria-label="Line chart of validation loss falling from 0.94 to 0.21 over 24 epochs"></canvas>
+          <div class="readout">
+            <div>Final loss<strong>0.21</strong></div>
+            <div>Epochs<strong>24</strong></div>
+            <div>Params<strong>11.2M</strong></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="about">
+      <div class="panel glass">
+        <div class="section-head"><h2>About</h2></div>
+        <div class="about">
+          <div>
+            <p>I'm a final-year data science student. Most of what I enjoy sits before the model: finding out how a dataset was actually collected, what the missing rows mean, and whether the thing being measured is the thing anyone cares about.</p>
+            <p>Last summer I worked as a research assistant on the reef imagery project, which meant a lot of time defending label decisions to marine biologists. It made me much more careful about what a metric is really claiming.</p>
+            <p>Outside coursework I maintain the lecture-notes search tool for my cohort and help run the university's data society workshops on reproducible analysis.</p>
+          </div>
+          <div class="facts">
+            <div><span>Studying</span> BSc Data Science, final year</div>
+            <div><span>Focus</span> Time series, remote sensing</div>
+            <div><span>Looking for</span> Summer 2027 internship</div>
+            <div><span>Based in</span> Remote or on-site</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="contact">
+      <div class="contact glass">
+        <h2>Let's talk about data</h2>
+        <p>I'm looking for a summer internship where I can work on real, messy data with people who will tell me when I'm wrong.</p>
+        <div class="links">
+          <a class="btn" href="mailto:alex.rivera@example.edu">Email me</a>
+          <a class="btn ghost" href="https://github.com/">GitHub</a>
+          <a class="btn ghost" href="https://linkedin.com/">LinkedIn</a>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer>
+  <div class="shell">Built from scratch — the swell you started on and the water you're in now are one WebGL shader, no images or libraries. <a href="#top">Back to the surface</a></div>
+</footer>
+
+<div class="sea-controls glass" role="group" aria-label="Water controls">
+  <button type="button" data-group="chop" data-sea="calm" aria-pressed="false">Calm</button>
+  <button type="button" data-group="chop" data-sea="choppy" aria-pressed="true">Choppy</button>
+  <div class="divider"></div>
+  <button type="button" data-group="depth" data-sea="deep" aria-pressed="true">Deep</button>
+  <button type="button" data-group="depth" data-sea="shallow" aria-pressed="false">Shallow</button>
+  <div class="divider"></div>
+  <button type="button" data-group="play" data-sea="pause" aria-pressed="false">Pause</button>
+  <div class="divider"></div>
+  <span class="gauge" aria-hidden="true"><span class="dot"></span><span id="depth">Surface</span></span>
+</div>
+
+<script type="module" src="./scripts/main.js"></script>
+</body>
+</html>
