@@ -19,7 +19,6 @@ export function initOcean() {
   uniform vec2  uRes;
   uniform float uTime;
   uniform vec2  uMouse;
-  uniform vec2  uMousePx;
   uniform float uScroll;
   uniform float uChop;
   uniform float uShallow;
@@ -405,6 +404,21 @@ export function initOcean() {
     vec3 pmColor = vec3(0.0);
     float pmAlpha = 0.0;
 
+    // PRE-CALCULATE DYNAMIC UNDERWATER LIGHT FIELD (Caustics & God-rays)
+    float diveFadeLight = smoothstep(0.0, 0.5, uDive);
+    float globalCaustics = 0.0;
+    float globalShafts = 0.0;
+    
+    if (diveFadeLight > 0.0) {
+        vec2 cUV = (gl_FragCoord.xy / uRes.y) * 2.5 + vec2(uTime * 0.03, -uScroll * 0.2);
+        globalCaustics = getCaustics(cUV);
+        
+        vec2 shaftDir = normalize(vec2(SHAFT.x, SHAFT.y));
+        float shaftPhase = dot((gl_FragCoord.xy / uRes.y), vec2(shaftDir.x, -shaftDir.y)) * 6.0 + uTime * 0.6;
+        globalShafts = pow(sin(shaftPhase) * 0.5 + 0.5, 2.0) * pow(sin(shaftPhase * 2.3 + 1.0) * 0.5 + 0.5, 1.5);
+    }
+
+    // Process UI items
     for (int i = 0; i < MAX_GLASS; i++) {
         if (i >= uGlassCount) break;
         
@@ -436,6 +450,7 @@ export function initOcean() {
                 gGrad = distV.x > distV.y ? vec2(signP.x, 0.0) : vec2(0.0, signP.y);
             }
             float bevel = smoothstep(1.0, -10.0, dist);
+            // Normal map logic: flat face faces straight out (0,0,1), edges tilt outwards.
             vec3 gNormal = normalize(vec3(gGrad * (1.0 - bevel), 2.5));
 
             if (type < 0.5) {
@@ -448,9 +463,8 @@ export function initOcean() {
                 vec3 uTop = vec3(0.92, 0.99, 1.0); float uaTop = 0.84;
                 vec3 uMid = vec3(0.80, 0.94, 0.99); float uaMid = 0.60;
                 vec3 uBot = vec3(0.71, 0.90, 0.97); float uaBot = 0.66;
-                float diveFade = smoothstep(0.0, 1.0, uDive);
-                gradC = mix(gradC, localUV.y > 0.54 ? mix(uMid, uTop, (localUV.y - 0.54)/0.46) : mix(uBot, uMid, localUV.y/0.54), diveFade);
-                gradA = mix(gradA, localUV.y > 0.54 ? mix(uaMid, uaTop, (localUV.y - 0.54)/0.46) : mix(uaBot, uaMid, localUV.y/0.54), diveFade);
+                gradC = mix(gradC, localUV.y > 0.54 ? mix(uMid, uTop, (localUV.y - 0.54)/0.46) : mix(uBot, uMid, localUV.y/0.54), diveFadeLight);
+                gradA = mix(gradA, localUV.y > 0.54 ? mix(uaMid, uaTop, (localUV.y - 0.54)/0.46) : mix(uaBot, uaMid, localUV.y/0.54), diveFadeLight);
 
                 if (uLayerRender == 0) {
                     glassCol = mix(finalCol, gradC, gradA);
@@ -484,7 +498,7 @@ export function initOcean() {
             float innerDark = smoothstep(0.0, -6.0, dist) * smoothstep(0.4, 0.0, localUV.y);
             glassCol *= mix(1.0, 0.7, innerDark);
 
-            // Parabolic Cap
+            // Parabolic Cap (Frutiger Aero top reflection)
             float maxCapHeight = min(gSize.y * 0.44, type < 0.5 ? 60.0 : 25.0);
             float edgeCapHeight = maxCapHeight * 0.65;
             float capDip = maxCapHeight - edgeCapHeight;
@@ -500,10 +514,41 @@ export function initOcean() {
             float border = smoothstep(0.0, -1.0, dist) - smoothstep(-1.5, -3.0, dist);
             glassCol = mix(glassCol, vec3(1.0), border * (type < 0.5 ? 0.8 : 0.4));
 
-            // Specular
-            vec3 lightDir = normalize(vec3(uMousePx - gl_FragCoord.xy, 600.0));
-            vec3 halfDir = normalize(lightDir + vec3(0.0, 0.0, 1.0));
-            float spec = pow(max(dot(gNormal, halfDir), 0.0), 180.0) * (type < 0.5 ? 0.5 : 0.3);
+            // INTEGRATION WITH NATURAL LIGHT PHYSICS (Fixing the Glass Material)
+            vec3 uiLightDir = normalize(vec3(SUN.x * 0.8, 0.7, 0.8));
+            vec3 viewDir = vec3(0.0, 0.0, 1.0); // Looking straight at UI
+            vec3 halfDir = normalize(uiLightDir + viewDir);
+            
+            float ndoth = clamp(dot(gNormal, halfDir), 0.0, 1.0);
+            float ndotv = clamp(dot(gNormal, viewDir), 0.0, 1.0);
+            
+            // 1. Sharp Specular Glint (Simulating bright point-light from the sun)
+            float specPower = mix(200.0, 100.0, diveFadeLight); // Very sharp above water, slightly softer below
+            float specBase = pow(ndoth, specPower) * (type < 0.5 ? 0.8 : 0.4);
+            
+            // 2. Edge Mask (0.0 on the flat face of the panel, increases as the bevel curves)
+            float isEdge = length(gNormal.xy);
+            
+            // 3. Dynamic underwater light (Caustics & God-rays)
+            // Strictly applied to the physical edges of the glass, giving it a prismatic volume
+            // without blooming out and washing away the text on the flat surface.
+            float dynamicLight = (globalCaustics * 1.0 + globalShafts * 1.5) * isEdge;
+            
+            // 4. Fresnel Sheen (Makes edges catch ambient light naturally)
+            float fresnel = pow(1.0 - ndotv, 4.0) * (type < 0.5 ? 0.5 : 0.2);
+            
+            vec3 specColorSurf = vec3(1.0, 0.98, 0.95);
+            vec3 specColorUnder = vec3(0.6, 0.9, 1.0);
+            vec3 envColor = mix(specColorSurf, specColorUnder, diveFadeLight);
+            
+            // Combine the lighting strictly as an additive specular overlay
+            vec3 spec = envColor * (specBase + dynamicLight * diveFadeLight + fresnel);
+
+            // Subtle ambient bounce from the seabed underwater (illuminates bottom edges of glass)
+            if (diveFadeLight > 0.0) {
+                float bottomEdge = clamp(-gNormal.y, 0.0, 1.0);
+                spec += vec3(0.15, 0.45, 0.6) * bottomEdge * 0.5 * diveFadeLight;
+            }
 
             if (uLayerRender == 0) {
                 glassCol += spec;
@@ -511,7 +556,7 @@ export function initOcean() {
             } else {
                 // Correct Bottom-to-Top Pre-Multiplied Alpha Blending
                 float srcA = currentAlpha * glassMask;
-                vec3 srcC = glassCol * srcA + vec3(1.0) * spec * glassMask; 
+                vec3 srcC = glassCol * srcA + spec * glassMask; 
                 pmColor = srcC + pmColor * (1.0 - srcA);
                 pmAlpha = srcA + pmAlpha * (1.0 - srcA);
             }
@@ -573,7 +618,6 @@ export function initOcean() {
       res:         gl.getUniformLocation(prog, 'uRes'),
       time:        gl.getUniformLocation(prog, 'uTime'),
       mouse:       gl.getUniformLocation(prog, 'uMouse'),
-      mousePx:     gl.getUniformLocation(prog, 'uMousePx'),
       scroll:      gl.getUniformLocation(prog, 'uScroll'),
       chop:        gl.getUniformLocation(prog, 'uChop'),
       shallow:     gl.getUniformLocation(prog, 'uShallow'),
@@ -591,7 +635,7 @@ export function initOcean() {
       }
     }
 
-    function draw(elsArray, clock, mx, my, mPxX, mPxY, scroll, chop, shallowCurrent, diveValue, scaleX, scaleY) {
+    function draw(elsArray, clock, mx, my, scroll, chop, shallowCurrent, diveValue, scaleX, scaleY) {
       gl.useProgram(prog);
       
       let count = 0;
@@ -638,7 +682,6 @@ export function initOcean() {
       gl.uniform2f(U.res, canvas.width, canvas.height);
       gl.uniform1f(U.time, clock);
       gl.uniform2f(U.mouse, mx, my);
-      gl.uniform2f(U.mousePx, mPxX * scaleX, h - (mPxY * scaleY));
       gl.uniform1f(U.scroll, scroll);
       gl.uniform1f(U.chop, chop);
       gl.uniform1f(U.shallow, shallowCurrent);
@@ -662,8 +705,6 @@ export function initOcean() {
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let scale = window.innerWidth > 1500 ? 0.72 : 0.85;
   let chop = 1.0, target = { x: 0, y: 0 }, mouse = { x: 0, y: 0 };
-  let clientMouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-  let currentMousePx = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
   let shallowTarget = 0.0, shallowCurrent = 0.0;
   let scroll = 0, clock = 0, last = performance.now();
   let running = !reduced, paused = false;
@@ -723,9 +764,6 @@ export function initOcean() {
       }
     }
 
-    currentMousePx.x += (clientMouse.x - currentMousePx.x) * 0.1;
-    currentMousePx.y += (clientMouse.y - currentMousePx.y) * 0.1;
-
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5) * scale;
     const w = Math.max(1, Math.round(window.innerWidth * dpr));
     const h = Math.max(1, Math.round(window.innerHeight * dpr));
@@ -733,10 +771,10 @@ export function initOcean() {
     const scaleY = h / window.innerHeight;
 
     baseRenderer.resize(w, h);
-    baseRenderer.draw(baseEls, clock, mouse.x, mouse.y, currentMousePx.x, currentMousePx.y, scroll, chop, shallowCurrent, Dive.value, scaleX, scaleY);
+    baseRenderer.draw(baseEls, clock, mouse.x, mouse.y, scroll, chop, shallowCurrent, Dive.value, scaleX, scaleY);
 
     uiRenderer.resize(w, h);
-    uiRenderer.draw(uiEls, clock, mouse.x, mouse.y, currentMousePx.x, currentMousePx.y, scroll, chop, shallowCurrent, Dive.value, scaleX, scaleY);
+    uiRenderer.draw(uiEls, clock, mouse.x, mouse.y, scroll, chop, shallowCurrent, Dive.value, scaleX, scaleY);
   }
 
   let slow = 0, downshifted = false;
@@ -767,8 +805,6 @@ export function initOcean() {
   window.addEventListener('scroll', () => { if (!running) updateGlassAndDraw(); }, { passive: true });
 
   window.addEventListener('pointermove', (e) => {
-    clientMouse.x = e.clientX;
-    clientMouse.y = e.clientY;
     target.x = (e.clientX / window.innerWidth) * 2 - 1;
     target.y = -((e.clientY / window.innerHeight) * 2 - 1);
   }, { passive: true });
