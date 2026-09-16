@@ -2,9 +2,12 @@
    FRUTIGER AERO PORTFOLIO — design tokens
    ============================================================ */
 :root{
-  --deep:#062f4f;
-  --ink:#0a3352;
-  --ink-soft:#2c5a7d;
+  /* Dark Aero typography palette */
+  --deep:#ffffff;
+  --ink:#f4f9fc;       /* Pushed to near-white for high contrast */
+  --ink-soft:#e2eef5;  /* Brighter silver/white instead of blue */
+  
+  /* Original accents */
   --aqua:#16a7e8;
   --aqua-dark:#0a6fb0;
   --foam:#f2fbff;
@@ -24,7 +27,8 @@ body{
   min-height:100%;
   font:400 16px/1.65 "Segoe UI","Frutiger","Frutiger Linotype",Tahoma,Verdana,Geneva,sans-serif;
   color:var(--ink);
-  background:#0d4f7d;
+  background:#062f4f; /* Darkened for better fallback contrast */
   -webkit-font-smoothing:antialiased;
   overflow-x:hidden;
 }
+

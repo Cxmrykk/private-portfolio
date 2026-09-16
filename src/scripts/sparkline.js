@@ -23,19 +23,22 @@ export function initSparkline() {
       padY + (1 - (loss[i] - min) / (max - min)) * (h - padY * 2)
     ];
 
-    ctx.strokeStyle = 'rgba(10,80,130,.13)';
+    /* Update to a light, translucent grid for Dark Aero contrast */
+    ctx.strokeStyle = 'rgba(255,255,255,.15)';
     ctx.lineWidth = 1;
     for (let g = 1; g < 4; g++){
       const y = padY + (g / 4) * (h - padY * 2);
       ctx.beginPath(); ctx.moveTo(padX, y); ctx.lineTo(w - padX, y); ctx.stroke();
     }
 
+    /* Update line to brighter glowing cyan tones */
     const line = ctx.createLinearGradient(0, 0, w, 0);
-    line.addColorStop(0, '#0a6fb0'); line.addColorStop(1, '#3fc0f0');
+    line.addColorStop(0, '#3fc0f0'); line.addColorStop(1, '#a5e4ff');
 
+    /* Update area wash to a translucent glowing cyan */
     const area = ctx.createLinearGradient(0, 0, 0, h);
-    area.addColorStop(0, 'rgba(63,192,240,.42)');
-    area.addColorStop(1, 'rgba(63,192,240,0)');
+    area.addColorStop(0, 'rgba(165,228,255,.4)');
+    area.addColorStop(1, 'rgba(165,228,255,0)');
 
     ctx.beginPath();
     loss.forEach((_, i) => { const [x, y] = pt(i); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
@@ -51,9 +54,10 @@ export function initSparkline() {
     const [lx, ly] = pt(loss.length - 1);
     ctx.beginPath(); ctx.arc(lx, ly, 4.2, 0, Math.PI * 2);
     ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.strokeStyle = '#0a6fb0'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = '#a5e4ff'; ctx.lineWidth = 2; ctx.stroke();
   }
 
   render();
   let t; window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(render, 150); });
 }
+

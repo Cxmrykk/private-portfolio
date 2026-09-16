@@ -37,42 +37,53 @@ body.is-underwater .glass{
 .btn:hover{transform:translateY(1px)}
 .btn:active{transform:translateY(2px)}
 .btn.ghost{
-  color:var(--deep);
-  text-shadow:0 1px 0 rgba(255,255,255,.9);
+  color:#ffffff;
+  text-shadow:0 1px 3px rgba(0,0,0,0.8), 0 2px 8px rgba(0,0,0,0.4);
 }
 
 /* ---------- project cards ---------- */
 .card{padding:22px 24px 24px; display:flex; flex-direction:column; gap:12px}
-.card h3{margin:0; font-size:1.18rem; font-weight:600; color:var(--deep); letter-spacing:-.01em}
-.card p{margin:0; font-size:15px; color:var(--ink-soft)}
+.card h3{
+  margin:0; font-size:1.18rem; font-weight:600; color:var(--deep); letter-spacing:-.01em; 
+  text-shadow:0 1px 4px rgba(0,0,0,0.7), 0 2px 10px rgba(0,0,0,0.4);
+}
+.card p{
+  margin:0; font-size:15px; color:var(--ink-soft); 
+  text-shadow:0 1px 3px rgba(0,0,0,0.8), 0 1px 8px rgba(0,0,0,0.5);
+}
 
 /* Result pills and chips are printed flat onto the card: one
    translucent fill, a hairline, no bevel and no shadow. */
 .card .result{
   display:inline-flex; align-items:center; justify-content:center; gap:8px;
-  font-size:14.5px; color:#1d5c25; font-weight:600;
+  font-size:14.5px; color:#c4f0a1; font-weight:600;
   padding:6px 13px; border-radius:999px; align-self:flex-start;
-  background:rgba(124,201,63,.22);
-  border:1px solid rgba(90,170,50,.35);
+  background:rgba(0,0,0,0.25);
+  border:1px solid rgba(124,201,63,0.4);
+  text-shadow:0 1px 3px rgba(0,0,0,0.7);
 }
 .chips{display:flex; flex-wrap:wrap; gap:7px; margin-top:auto; padding-top:6px}
 .chips b{
   display:inline-flex; align-items:center; justify-content:center;
-  font:500 12.5px/1 "Segoe UI",Tahoma,sans-serif; color:#0b4d78;
+  font:500 12.5px/1 "Segoe UI",Tahoma,sans-serif; color:#d4f0ff;
   padding:6px 11px; border-radius:999px;
-  background:rgba(10,111,176,.10);
-  border:1px solid rgba(10,111,176,.18);
+  background:rgba(0,0,0,0.2);
+  border:1px solid rgba(165,228,255,0.3);
+  text-shadow:0 1px 2px rgba(0,0,0,0.6);
 }
 
 /* ---------- meters ---------- */
 .meter-row{display:grid; grid-template-columns:1fr auto; gap:4px 14px; align-items:center}
-.meter-row .name{font-size:15px; color:var(--deep); font-weight:600}
-.meter-row .note{font-size:13.5px; color:var(--ink-soft)}
+.meter-row .name{
+  font-size:15px; color:var(--deep); font-weight:600; 
+  text-shadow:0 1px 3px rgba(0,0,0,0.7), 0 1px 8px rgba(0,0,0,0.4);
+}
+.meter-row .note{font-size:13.5px; color:var(--ink-soft); text-shadow:0 1px 3px rgba(0,0,0,0.7);}
 .meter{
   grid-column:1 / -1;
   height:15px; border-radius:9px; overflow:hidden;
-  background:linear-gradient(180deg,#bfdcec,#e9f6fd);
-  box-shadow:inset 0 2px 4px rgba(6,47,79,.35), 0 1px 0 rgba(255,255,255,.8);
+  background:rgba(0,0,0,0.3);
+  box-shadow:inset 0 2px 4px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.1);
 }
 .meter i{
   display:block; height:100%; border-radius:9px; position:relative;
@@ -88,14 +99,20 @@ body.is-underwater .glass{
 
 /* Vista-style sidebar gadget */
 .gadget{padding:18px 18px 20px}
-.gadget h3{margin:0 0 2px; font-size:1rem; font-weight:600; color:var(--deep)}
-.gadget .sub{margin:0 0 12px; font-size:13px; color:var(--ink-soft)}
+.gadget h3{
+  margin:0 0 2px; font-size:1rem; font-weight:600; color:var(--deep); 
+  text-shadow:0 1px 3px rgba(0,0,0,0.7), 0 2px 8px rgba(0,0,0,0.4);
+}
+.gadget .sub{margin:0 0 12px; font-size:13px; color:var(--ink-soft); text-shadow:0 1px 3px rgba(0,0,0,0.7);}
 #spark{width:100%; height:120px; display:block; border-radius:12px;
   background:transparent !important; /* Base glass shines through */
   box-shadow:none !important;
 }
 .readout{display:flex; justify-content:space-between; gap:10px; margin-top:12px; font-size:13.5px; color:var(--ink-soft)}
-.readout strong{display:block; font-size:19px; color:var(--deep); font-weight:600; letter-spacing:-.01em}
+.readout strong{
+  display:block; font-size:19px; color:var(--deep); font-weight:600; letter-spacing:-.01em; 
+  text-shadow:0 1px 3px rgba(0,0,0,0.7), 0 1px 8px rgba(0,0,0,0.4);
+}
 
 /* ---------- water controls (expandable sliders) ---------- */
 .sea-controls{
@@ -109,9 +126,9 @@ body.is-underwater .glass{
 }
 .sea-status .divider {
   width:1px; height:20px;
-  background:linear-gradient(180deg, rgba(255,255,255,0), rgba(8,74,122,.2) 50%, rgba(255,255,255,0));
+  background:linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,0.3) 50%, rgba(255,255,255,0));
 }
-.settings-hint{font:600 13px/1 "Segoe UI",Tahoma,sans-serif; color:#0b4d78;}
+.settings-hint{font:600 13px/1 "Segoe UI",Tahoma,sans-serif; color:#d4f0ff; text-shadow:0 1px 3px rgba(0,0,0,0.7)}
 
 .sea-panel{
   padding:18px 20px; border-radius:var(--panel-radius);
@@ -131,32 +148,33 @@ body.is-underwater .glass{
 
 .sea-panel label{
   display:flex; flex-direction:column; gap:8px;
-  font:600 13px/1 "Segoe UI",Tahoma,sans-serif; color:#0b4d78;
+  font:600 13px/1 "Segoe UI",Tahoma,sans-serif; color:#d4f0ff;
+  text-shadow:0 1px 3px rgba(0,0,0,0.7);
 }
 .sea-panel input[type="range"]{
   -webkit-appearance:none; appearance:none; width:100%; background:transparent; margin:0;
 }
 .sea-panel input[type="range"]:focus{outline:none;}
 .sea-panel input[type="range"]::-webkit-slider-runnable-track{
-  height:10px; background:linear-gradient(180deg, #bfdcec, #e9f6fd);
-  border:1px solid rgba(255,255,255,.8); box-shadow:inset 0 2px 4px rgba(6,47,79,.35);
+  height:10px; background:rgba(0,0,0,0.3);
+  border:1px solid rgba(255,255,255,0.2); box-shadow:inset 0 2px 4px rgba(0,0,0,0.5);
   border-radius:999px;
 }
 .sea-panel input[type="range"]::-webkit-slider-thumb{
   -webkit-appearance:none; height:20px; width:20px; margin-top:-6px;
   background:linear-gradient(180deg, #ffffff, #d0ecfb); border:1px solid #fff;
-  box-shadow:0 2px 6px rgba(8,74,122,.5), inset 0 -3px 6px rgba(10,110,180,.3);
+  box-shadow:0 2px 6px rgba(0,0,0,0.5), inset 0 -3px 6px rgba(10,110,180,.3);
   border-radius:50%; cursor:pointer;
 }
 .sea-panel input[type="range"]::-moz-range-track{
-  height:10px; background:linear-gradient(180deg, #bfdcec, #e9f6fd);
-  border:1px solid rgba(255,255,255,.8); box-shadow:inset 0 2px 4px rgba(6,47,79,.35);
+  height:10px; background:rgba(0,0,0,0.3);
+  border:1px solid rgba(255,255,255,0.2); box-shadow:inset 0 2px 4px rgba(0,0,0,0.5);
   border-radius:999px;
 }
 .sea-panel input[type="range"]::-moz-range-thumb{
   height:20px; width:20px; border:none; margin-top:0;
   background:linear-gradient(180deg, #ffffff, #d0ecfb); border:1px solid #fff;
-  box-shadow:0 2px 6px rgba(8,74,122,.5), inset 0 -3px 6px rgba(10,110,180,.3);
+  box-shadow:0 2px 6px rgba(0,0,0,0.5), inset 0 -3px 6px rgba(10,110,180,.3);
   border-radius:50%; cursor:pointer;
 }
 .sea-panel input[type="range"]:focus-visible::-webkit-slider-thumb{
@@ -168,22 +186,25 @@ body.is-underwater .glass{
 
 .panel-btn{
   cursor:pointer; font:600 13px/1 "Segoe UI",Tahoma,sans-serif;
-  padding:9px 14px; border-radius:999px; color:#0b4d78;
-  background:linear-gradient(180deg, rgba(255,255,255,.96), rgba(208,236,251,.9));
-  border:1px solid rgba(255,255,255,.95);
-  box-shadow:inset 0 1px 0 #fff, 0 2px 6px -3px rgba(8,74,122,.7);
+  padding:9px 14px; border-radius:999px; color:#d4f0ff;
+  background:rgba(0,0,0,0.2);
+  border:1px solid rgba(255,255,255,0.2);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.1);
   margin-top:4px;
 }
 .panel-btn[aria-pressed="true"]{
   color:#fff;
   background:linear-gradient(180deg,#7fd3ff,#1f9ce0 48%,#0b6fb4 52%,#09609c);
   text-shadow:0 -1px 0 rgba(4,56,94,.5);
+  border-color:rgba(255,255,255,.95);
+  box-shadow:inset 0 1px 0 #fff, 0 2px 6px -3px rgba(0,0,0,.7);
 }
 
 .gauge{
   display:flex; align-items:center; gap:7px;
-  font:600 12.5px/1 "Segoe UI",Tahoma,sans-serif; color:#0b4d78;
+  font:600 12.5px/1 "Segoe UI",Tahoma,sans-serif; color:#d4f0ff;
   padding:0 4px; white-space:nowrap;
+  text-shadow:0 1px 3px rgba(0,0,0,0.7);
 }
 .gauge .dot{
   width:9px; height:9px; border-radius:50%; flex:none;
@@ -198,10 +219,11 @@ a:focus-visible, button:focus-visible{
 }
 .skip{
   position:absolute; left:-9999px; top:0; z-index:50;
-  padding:12px 18px; background:#fff; color:var(--deep); border-radius:0 0 12px 0;
+  padding:12px 18px; background:rgba(0,0,0,0.8); color:#ffffff; border-radius:0 0 12px 0;
 }
 .skip:focus{left:0}
 
 @media (max-width:860px){
   /* Inherit standard layout behaviors on small screens */
 }
+
