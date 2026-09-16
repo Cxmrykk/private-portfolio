@@ -2,11 +2,13 @@ import { Dive } from './dive.js';
 
 /* ============================================================
    THE OCEAN — WebGL2, procedural, above and below the surface
+   + Hyperrealistic Frutiger Aero UI Overlay Renderer
    ============================================================ */
 export function initOcean() {
   const canvas = document.getElementById('sea');
   const gl = canvas.getContext('webgl2', {
-    antialias: false, alpha: false, depth: false, stencil: false,
+    antialias: true, 
+    alpha: false, depth: false, stencil: false,
     powerPreference: 'high-performance'
   });
 
@@ -26,16 +28,21 @@ export function initOcean() {
   uniform vec2  uRes;
   uniform float uTime;
   uniform vec2  uMouse;
+  uniform vec2  uMousePx;
   uniform float uScroll;
-  uniform float uChop;     // 0.55 calm .. 1.0 choppy
-  uniform float uShallow;  // 0.0 deep ocean .. 1.0 shallow refractive reef
-  uniform float uDive;     // 0.0 above the swell .. 1.0 at depth
+  uniform float uChop;
+  uniform float uShallow;
+  uniform float uDive;
+
+  // UI Glass Parameters
+  #define MAX_GLASS 60
+  uniform int   uGlassCount;
+  uniform vec4  uGlassRects[MAX_GLASS];  // x, y, width, height (in canvas pixels)
+  uniform vec4  uGlassParams[MAX_GLASS]; // r: radius, g: type, b: hover state, a: opacity
 
   out vec4 fragColor;
 
   #define SUN   normalize(vec3(0.34, 0.20, -0.92))
-  /* Sunlight refracted through the surface bends toward the vertical,
-     so the underwater shafts are much steeper than the sun itself. */
   #define SHAFT normalize(vec3(0.254, 0.682, -0.686))
 
   /* ---------- noise functions ---------- */
@@ -54,6 +61,7 @@ export function initOcean() {
     float d = hash21(i + vec2(1.0, 1.0));
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
   }
+  
   float fbm(vec2 p){
     float s = 0.0, a = 0.5;
     mat2 m = mat2(1.62, 1.18, -1.18, 1.62);
@@ -61,37 +69,31 @@ export function initOcean() {
     return s;
   }
 
-  /* ---------- wave field ----------
-     Sum of sines pushed through exp() to sharpen crests, with continuous
-     screen-space LOD so sub-pixel waves fade out instead of aliasing. */
+  /* ---------- wave field ---------- */
   float waveField(vec2 p, float dist, int max_octaves, out vec2 grad){
     float h = 0.0;
     grad = vec2(0.0);
     float amp = 0.62, freq = 0.30, speed = 1.0, k = 1.60 * uChop;
     float ang = 0.0;
     vec2 warp = vec2(0.0);
-
-    float pixel_width = max(dist * 0.0025, 0.001);
+    float pixel_width = max(dist * 0.0035, 0.001);
 
     for (int i = 0; i < 14; i++){
       if (i >= max_octaves) break;
-
       float wave_width = 1.0 / freq;
-      float lod = smoothstep(pixel_width, pixel_width * 3.0, wave_width);
+      float lod = smoothstep(pixel_width, pixel_width * 3.5, wave_width);
       if (lod < 0.001) break;
 
-      ang += 2.39996;                               // golden angle offset
+      ang += 2.39996;
       vec2 d = vec2(cos(ang), sin(ang));
       float ph = dot(p + warp, d) * freq + uTime * speed * freq * 2.4;
-
       float s  = sin(ph);
-      float w  = exp(k * s - k);                    // sharp crest, flat trough
+      float w  = exp(k * s - k);
       float dw = k * cos(ph) * w;
 
       h    += amp * w * lod;
       grad += amp * dw * freq * d * lod;
       warp += d * w * amp * 0.38 * lod;
-
       amp *= 0.66; freq *= 1.79; speed *= 1.06; k *= 0.93;
     }
     grad *= 0.80;
@@ -99,8 +101,7 @@ export function initOcean() {
   }
 
   float waveHeight(vec2 p, int max_octaves){
-    vec2 g;
-    return waveField(p, 0.0, max_octaves, g);
+    vec2 g; return waveField(p, 0.0, max_octaves, g);
   }
 
   /* ---------- sky ---------- */
@@ -111,9 +112,9 @@ export function initOcean() {
     vec3 col = mix(horizon, zenith, pow(clamp(y, 0.0, 1.0), 0.60));
 
     float sd = max(dot(rd, SUN), 0.0);
-    col += vec3(1.00, 0.88, 0.66) * pow(sd, 1200.0) * 14.0;   // sun disc
-    col += vec3(1.00, 0.80, 0.52) * pow(sd, 22.0)   * 0.38;   // glow
-    col += vec3(0.95, 0.80, 0.60) * pow(sd, 3.0)    * 0.06;   // wide haze
+    col += vec3(1.00, 0.88, 0.66) * pow(sd, 1200.0) * 14.0;
+    col += vec3(1.00, 0.80, 0.52) * pow(sd, 22.0)   * 0.38;
+    col += vec3(0.95, 0.80, 0.60) * pow(sd, 3.0)    * 0.06;
 
     if (rd.y > 0.004){
       vec2 cp = rd.xz / max(rd.y, 0.055);
@@ -128,17 +129,14 @@ export function initOcean() {
     return col;
   }
 
-  /* ---------- ray marching, from above ---------- */
+  /* ---------- ray marching ---------- */
   float traceOcean(vec3 ro, vec3 rd, out vec3 hitP){
     float tn = 0.0, tf = 300.0;
     hitP = ro;
-
     if (rd.y > 0.01 && ro.y > 0.5) return -1.0;
-
     float tm = tn;
     float dN = ro.y - waveHeight(ro.xz, 5);
     float dF = (ro.y + rd.y * tf) - waveHeight((ro + rd * tf).xz, 5);
-
     if (dF > 0.0) return -1.0;
 
     for (int i = 0; i < 11; i++){
@@ -151,7 +149,6 @@ export function initOcean() {
     return tm;
   }
 
-  /* ---------- the underside of the surface, traced from below ---------- */
   float traceUnderside(vec3 ro, vec3 rd){
     float t = (0.0 - ro.y) / max(rd.y, 0.02);
     for (int i = 0; i < 4; i++){
@@ -175,7 +172,7 @@ export function initOcean() {
     return pow(clamp(c * 0.5 + 0.5, 0.0, 1.0), 4.0);
   }
 
-  /* ---------- surface shading, seen from above ---------- */
+  /* ---------- surface shading ---------- */
   vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
     vec3 refl = reflect(rd, n);
     refl.y = max(refl.y, 0.015);
@@ -183,7 +180,6 @@ export function initOcean() {
 
     float f0 = 0.02;
     float fres = f0 + (1.0 - f0) * pow(clamp(1.0 - dot(-rd, n), 0.0, 1.0), 5.0);
-
     float crest = clamp(p.y * 0.95 + 0.45, 0.0, 1.0);
 
     vec3 deepD    = vec3(0.005, 0.080, 0.180);
@@ -212,7 +208,7 @@ export function initOcean() {
     vec3 hv = normalize(SUN - rd);
     float specMain = pow(clamp(dot(n, hv), 0.0, 1.0), 400.0) * 3.0;
 
-    float microFade = smoothstep(50.0, 10.0, dist);
+    float microFade = smoothstep(60.0, 15.0, dist);
     float spec = specMain;
 
     if (microFade > 0.01) {
@@ -220,7 +216,7 @@ export function initOcean() {
       vec2 microUV = p.xz * 12.0 - uTime * 0.3;
       float micro = vnoise(rot * microUV) * 0.5 + 0.5;
       vec3 nGlint = normalize(n + vec3(micro * 0.15, 0.0, micro * 0.15) * microFade);
-      float specGlint = pow(clamp(dot(nGlint, hv), 0.0, 1.0), 1500.0) * (8.0 * microFade);
+      float specGlint = pow(clamp(dot(nGlint, hv), 0.0, 1.0), 1200.0) * (3.0 * microFade);
       spec += specGlint;
     }
 
@@ -239,9 +235,7 @@ export function initOcean() {
     return col;
   }
 
-  /* ============================================================
-     UNDERWATER
-     ============================================================ */
+  /* ---------- UNDERWATER ---------- */
   float seabedDepth(){ return mix(-27.0, -12.0, uShallow); }
 
   vec3 seabedColor(vec3 p){
@@ -250,69 +244,51 @@ export function initOcean() {
     float ripple = sin(q.x * 1.7 + sin(q.y * 1.2) * 1.8) * 0.5 + 0.5;
     vec3 sand = mix(vec3(0.40, 0.38, 0.30), vec3(0.88, 0.84, 0.70),
                     clamp(grain * 0.65 + ripple * 0.35, 0.0, 1.0));
-
     float weed = smoothstep(0.52, 0.80, fbm(q * 0.22 + 7.3));
     sand = mix(sand, vec3(0.10, 0.24, 0.16), weed * 0.70);
-
     float rocks = smoothstep(0.74, 0.90, fbm(q * 0.95 + 21.0));
     sand = mix(sand, vec3(0.30, 0.32, 0.31), rocks * 0.55);
-
-    /* caustics are the surface pattern projected down the refracted sun */
     vec3 s = p + SHAFT * ((0.0 - p.y) / SHAFT.y);
     float c = getCaustics(s.xz * 0.38);
     sand += vec3(1.0, 0.95, 0.80) * c * 1.15 * exp(p.y * 0.035);
-
     return sand;
   }
 
   vec3 renderUnder(vec3 ro, vec3 rd){
     float bedY = seabedDepth();
-    vec3 col;
-    float t;
-
+    vec3 col; float t;
     if (rd.y > 0.035){
-      /* looking up at the underside: Snell's window and total internal reflection */
       t = min(traceUnderside(ro, rd), 260.0);
       vec3 p = ro + rd * t;
-      vec2 g;
-      waveField(p.xz, t, 10, g);
-      vec3 n  = normalize(vec3(-g.x, 1.0, -g.y));
+      vec2 g; waveField(p.xz, t, 10, g);
+      vec3 n = normalize(vec3(-g.x, 1.0, -g.y));
       vec3 nd = -n;
-
       vec3 refr = refract(rd, nd, 1.333);
       if (dot(refr, refr) > 1e-4){
         col = sky(normalize(refr)) * 1.06;
         float rim = 1.0 - clamp(dot(-rd, nd), 0.0, 1.0);
-        col += vec3(0.50, 0.86, 0.96) * pow(rim, 6.0) * 0.55;   // compressed horizon ring
+        col += vec3(0.50, 0.86, 0.96) * pow(rim, 6.0) * 0.55;
       } else {
         vec3 rr = reflect(rd, nd);
         float down = clamp(-rr.y, 0.0, 1.0);
-        col  = mix(vec3(0.03, 0.16, 0.24), vec3(0.16, 0.30, 0.28), down);
+        col = mix(vec3(0.03, 0.16, 0.24), vec3(0.16, 0.30, 0.28), down);
         col += vec3(0.20, 0.45, 0.48) * getCaustics(p.xz * 0.45) * 0.35;
       }
-      /* light dancing along the underside of the swell */
       col += vec3(0.30, 0.60, 0.62) * getCaustics(p.xz * 0.55) * 0.30;
-
     } else if (rd.y < -0.035){
       float tb = (bedY - ro.y) / rd.y;
       t = min(tb, 240.0);
       col = (tb < 240.0) ? seabedColor(ro + rd * t) : vec3(0.02, 0.09, 0.14);
-
     } else {
       t = 200.0;
       col = vec3(0.02, 0.09, 0.14);
     }
-
-    /* Beer-Lambert absorption: red dies first, blue-green survives */
     float td = min(t, 150.0);
     vec3 absorbC = vec3(0.155, 0.045, 0.028);
     vec3 ext = exp(-absorbC * td);
     float midY = ro.y + rd.y * td * 0.5;
     vec3 amb = vec3(0.045, 0.30, 0.42) * exp(clamp(midY, -70.0, 0.0) * 0.045);
     col = col * ext + amb * (1.0 - ext);
-
-    /* volumetric god rays: march the view ray, project each sample up the
-       refracted sun direction and sample the same caustic pattern */
     float shaft = 0.0;
     float dith  = hash21(gl_FragCoord.xy * 0.37 + fract(uTime) * 91.0);
     float segLen = min(td, 60.0) / 10.0;
@@ -325,66 +301,210 @@ export function initOcean() {
     shaft /= 10.0;
     float toSun = clamp(dot(rd, SHAFT), 0.0, 1.0);
     col += vec3(0.42, 0.86, 0.98) * shaft * (0.55 + 1.35 * pow(toSun, 2.2)) * 1.25;
-
     return col;
   }
 
   void main(){
     vec2 uv = (gl_FragCoord.xy * 2.0 - uRes) / uRes.y;
-
-    float d    = clamp(uDive, 0.0, 1.0);
-    /* shift start of sub effect down so we only trigger heavy underwater VFX 
-       when we are actually breaking the surface */
-    float sub  = smoothstep(0.15, 0.60, d); 
+    float d = clamp(uDive, 0.0, 1.0);
+    float sub = smoothstep(0.15, 0.60, d); 
     float bedY = seabedDepth();
     
     float camY;
     if (d < 0.3) {
-      float t = d / 0.3;
-      camY = 3.3 - 7.3 * t * t;
+      float t = d / 0.3; camY = 3.3 - 7.3 * t * t;
     } else {
-      float t = (d - 0.3) / 0.7;
-      camY = mix(-4.0, bedY + 1.5, t);
+      float t = (d - 0.3) / 0.7; camY = mix(-4.0, bedY + 1.5, t);
     }
     camY += sin(uTime * 0.42) * 0.16;
-
-    /* gentle refractive wobble once submerged */
     uv += vec2(sin(uv.y * 7.0 + uTime * 0.9), cos(uv.x * 6.0 + uTime * 0.75)) * 0.0045 * sub;
 
     vec3 ro = vec3(uMouse.x * 1.6 + sin(uTime * 0.23) * 0.6 * sub,
                    camY + uMouse.y * 0.35,
                    -uTime * 0.78);
-
     float pitch = mix(-0.085 - uScroll * 0.02, 0.0, smoothstep(0.0, 0.45, d))
                 + smoothstep(0.30, 0.62, d) * (1.0 - smoothstep(0.70, 1.0, d) * 0.66) * 0.30
                 + uMouse.y * 0.035;
-
     vec3 rd = normalize(vec3(uv.x, uv.y + pitch, -1.45));
 
+    /* ============================================================
+       FRUTIGER AERO UI OVERLAYS - Pass 1: Accumulate Refraction
+       ============================================================ */
+    vec2 refrOffset = vec2(0.0);
+
+    for (int i = 0; i < MAX_GLASS; i++) {
+      if (i >= uGlassCount) break;
+      
+      float r = uGlassParams[i].x;
+      float type = uGlassParams[i].y;
+      float op = uGlassParams[i].w;
+      
+      // Only translucent panel objects refract the background
+      if (type >= 0.5) continue; 
+      
+      vec4 rect = uGlassRects[i];
+      vec2 center = rect.xy + rect.zw * 0.5;
+      vec2 p = gl_FragCoord.xy - center;
+      
+      vec2 distV = abs(p) - rect.zw * 0.5 + vec2(r);
+      float dist = min(max(distV.x, distV.y), 0.0) + length(max(distV, 0.0)) - r;
+
+      if (dist < 1.0) {
+          vec2 signP = sign(p);
+          vec2 gGrad = vec2(0.0);
+          if (max(distV.x, distV.y) > 0.0) {
+              gGrad = signP * normalize(max(distV, 0.0));
+          } else {
+              gGrad = distV.x > distV.y ? vec2(signP.x, 0.0) : vec2(0.0, signP.y);
+          }
+          float bevel = smoothstep(1.0, -10.0, dist);
+          refrOffset -= (gGrad * (1.0 - bevel)) * 0.03 * op;
+      }
+    }
+
+    // Apply distortion locally to the raycast
+    rd.xy += refrOffset;
+    rd = normalize(rd);
+
+    /* --- Trace Background --- */
     vec3 col;
     if (ro.y < waveHeight(ro.xz, 5) - 0.02){
       col = renderUnder(ro, rd);
     } else {
-      vec3 p;
-      float t = traceOcean(ro, rd, p);
+      vec3 p; float t = traceOcean(ro, rd, p);
       if (t < 0.0){
         col = sky(rd);
       } else {
-        vec2 g;
-        waveField(p.xz, t, 14, g);
+        vec2 g; waveField(p.xz, t, 14, g);
         vec3 n = normalize(vec3(-g.x, 1.0, -g.y));
         col = shadeOcean(p, rd, n, t);
       }
     }
 
-    /* HDR exposure, gamma, saturation, plus an underwater vignette */
+    /* --- HDR Baseline / Grading --- */
     float expo = mix(1.28, 1.58, sub);
     col = 1.0 - exp(-col * expo);
     col = pow(col, vec3(0.86));
     col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, mix(1.12, 1.04, sub));
     col *= 1.0 - 0.45 * sub * smoothstep(0.55, 1.85, length(uv));
 
-    fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    /* ============================================================
+       APPLY UI MATERIALS - Pass 2: Sequential Bottom-to-Top Blend
+       ============================================================ */
+    vec3 finalCol = col;
+
+    // Elements are guaranteed dynamically sorted by layout Z-Index before being passed in
+    for (int i = 0; i < MAX_GLASS; i++) {
+        if (i >= uGlassCount) break;
+        
+        vec4 rect = uGlassRects[i];
+        float r = uGlassParams[i].x;
+        float type = uGlassParams[i].y;
+        float hover = uGlassParams[i].z;
+        float op = uGlassParams[i].w;
+
+        vec2 center = rect.xy + rect.zw * 0.5;
+        vec2 gSize = rect.zw;
+        vec2 p = gl_FragCoord.xy - center;
+        
+        vec2 distV = abs(p) - rect.zw * 0.5 + vec2(r);
+        float dist = min(max(distV.x, distV.y), 0.0) + length(max(distV, 0.0)) - r;
+
+        float glassMask = smoothstep(1.0, -0.5, dist) * op;
+
+        // If pixel is within current UI element bounds
+        if (glassMask > 0.0) {
+            vec2 localUV = (gl_FragCoord.xy - rect.xy) / gSize; // (0,0) bottom-left, (1,1) top-right
+            vec3 glassCol = vec3(0.0);
+            
+            // Recompute bounding gradient normal for 3D bevel specular logic
+            vec2 signP = sign(p);
+            vec2 gGrad = vec2(0.0);
+            if (max(distV.x, distV.y) > 0.0) {
+                gGrad = signP * normalize(max(distV, 0.0));
+            } else {
+                gGrad = distV.x > distV.y ? vec2(signP.x, 0.0) : vec2(0.0, signP.y);
+            }
+            float bevel = smoothstep(1.0, -10.0, dist);
+            vec3 gNormal = normalize(vec3(gGrad * (1.0 - bevel), 2.5));
+
+            if (type < 0.5) {
+                // Type 0: Glass Panel (Translucent)
+                vec3 cTop = vec3(1.0); float aTop = 0.86;
+                vec3 cMid = vec3(1.0); float aMid = 0.60;
+                vec3 cBot = vec3(0.87, 0.95, 1.0); float aBot = 0.66;
+                vec3 gradC = localUV.y > 0.54 ? mix(cMid, cTop, (localUV.y - 0.54)/0.46) : mix(cBot, cMid, localUV.y/0.54);
+                float gradA = localUV.y > 0.54 ? mix(aMid, aTop, (localUV.y - 0.54)/0.46) : mix(aBot, aMid, localUV.y/0.54);
+                
+                vec3 uTop = vec3(0.92, 0.99, 1.0); float uaTop = 0.84;
+                vec3 uMid = vec3(0.80, 0.94, 0.99); float uaMid = 0.60;
+                vec3 uBot = vec3(0.71, 0.90, 0.97); float uaBot = 0.66;
+                float diveFade = smoothstep(0.0, 1.0, uDive);
+                gradC = mix(gradC, localUV.y > 0.54 ? mix(uMid, uTop, (localUV.y - 0.54)/0.46) : mix(uBot, uMid, localUV.y/0.54), diveFade);
+                gradA = mix(gradA, localUV.y > 0.54 ? mix(uaMid, uaTop, (localUV.y - 0.54)/0.46) : mix(uaBot, uaMid, localUV.y/0.54), diveFade);
+
+                // Blend pane opacity onto current physical environment (or underlying panes) 
+                glassCol = mix(finalCol, gradC, gradA);
+
+            } else if (type < 1.5) {
+                // Type 1: Blue Gel Button (Opaque)
+                vec3 c1 = vec3(0.56, 0.86, 1.00);
+                vec3 c2 = vec3(0.18, 0.65, 0.91);
+                vec3 c3 = vec3(0.05, 0.46, 0.75);
+                vec3 c4 = vec3(0.04, 0.37, 0.63);
+                glassCol = localUV.y > 0.52 ? mix(c2, c1, (localUV.y - 0.52)/0.48) : mix(c4, c3, localUV.y/0.52);
+                if (hover > 0.5) glassCol = mix(glassCol, vec3(1.0), 0.12);
+            } else if (type < 2.5) {
+                // Type 2: Ghost Gel Button (Opaque)
+                vec3 topG = vec3(1.0);
+                vec3 midG = vec3(0.85, 0.94, 0.99);
+                vec3 botG = vec3(0.74, 0.89, 0.97);
+                glassCol = localUV.y > 0.5 ? mix(midG, topG, (localUV.y - 0.5)/0.5) : mix(botG, midG, localUV.y/0.5);
+                if (hover > 0.5) glassCol = mix(glassCol, vec3(1.0), 0.2);
+            } else if (type < 3.5) {
+                // Type 3: Green Result Gel (Opaque)
+                vec3 topGr = vec3(0.93, 0.99, 0.88);
+                vec3 botGr = vec3(0.80, 0.94, 0.70);
+                glassCol = mix(botGr, topGr, localUV.y);
+            } else {
+                // Type 4: Light Blue Chip Gel (Opaque)
+                glassCol = mix(vec3(0.81, 0.92, 0.98), vec3(1.0), localUV.y);
+            }
+
+            // Inner Shadow (Bottom edge shading for depth)
+            float innerDark = smoothstep(0.0, -6.0, dist) * smoothstep(0.4, 0.0, localUV.y);
+            glassCol *= mix(1.0, 0.7, innerDark);
+
+            // Sweeping Parabolic Aqua Gloss Cap 
+            // Evaluated via dynamic pixel boundaries so it won't stretch awkwardly inside huge cards
+            float maxCapHeight = min(gSize.y * 0.44, type < 0.5 ? 60.0 : 25.0);
+            float edgeCapHeight = maxCapHeight * 0.65;
+            float capDip = maxCapHeight - edgeCapHeight;
+            float currentCapHeight = maxCapHeight - capDip * pow(abs(localUV.x - 0.5) * 2.0, 2.0);
+            float distFromTop = gSize.y * (1.0 - localUV.y);
+            
+            if (distFromTop < currentCapHeight) {
+                float capT = 1.0 - (distFromTop / currentCapHeight);
+                float capAlpha = mix(0.0, 0.7, capT);
+                glassCol = mix(glassCol, vec3(1.0), capAlpha);
+            }
+
+            // Clean subtle border
+            float border = smoothstep(0.0, -1.0, dist) - smoothstep(-1.5, -3.0, dist);
+            glassCol = mix(glassCol, vec3(1.0), border * (type < 0.5 ? 0.8 : 0.4));
+
+            // 3D Specular Point Light (Tracking Mouse)
+            vec3 lightDir = normalize(vec3(uMousePx - gl_FragCoord.xy, 600.0));
+            vec3 halfDir = normalize(lightDir + vec3(0.0, 0.0, 1.0));
+            float spec = pow(max(dot(gNormal, halfDir), 0.0), 180.0);
+            glassCol += spec * (type < 0.5 ? 0.5 : 0.3); // Kept subtle to avoid blowing out buttons
+
+            // Sequentially overwrite finalCol to correctly compound opacities overlapping in Z-space
+            finalCol = mix(finalCol, glassCol, glassMask);
+        }
+    }
+
+    fragColor = vec4(clamp(finalCol, 0.0, 1.0), 1.0);
   }`;
 
   function compile(type, src){
@@ -414,21 +534,31 @@ export function initOcean() {
   gl.bindVertexArray(gl.createVertexArray());
 
   const U = {
-    res:     gl.getUniformLocation(prog, 'uRes'),
-    time:    gl.getUniformLocation(prog, 'uTime'),
-    mouse:   gl.getUniformLocation(prog, 'uMouse'),
-    scroll:  gl.getUniformLocation(prog, 'uScroll'),
-    chop:    gl.getUniformLocation(prog, 'uChop'),
-    shallow: gl.getUniformLocation(prog, 'uShallow'),
-    dive:    gl.getUniformLocation(prog, 'uDive')
+    res:         gl.getUniformLocation(prog, 'uRes'),
+    time:        gl.getUniformLocation(prog, 'uTime'),
+    mouse:       gl.getUniformLocation(prog, 'uMouse'),
+    mousePx:     gl.getUniformLocation(prog, 'uMousePx'),
+    scroll:      gl.getUniformLocation(prog, 'uScroll'),
+    chop:        gl.getUniformLocation(prog, 'uChop'),
+    shallow:     gl.getUniformLocation(prog, 'uShallow'),
+    dive:        gl.getUniformLocation(prog, 'uDive'),
+    glassRects:  gl.getUniformLocation(prog, 'uGlassRects'),
+    glassParams: gl.getUniformLocation(prog, 'uGlassParams'),
+    glassCount:  gl.getUniformLocation(prog, 'uGlassCount')
   };
 
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let scale = window.innerWidth > 1500 ? 0.72 : 0.85;
   let chop = 1.0, target = { x: 0, y: 0 }, mouse = { x: 0, y: 0 };
+  let clientMouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  let currentMousePx = { x: canvas.width / 2, y: canvas.height / 2 };
   let shallowTarget = 0.0, shallowCurrent = 0.0;
   let scroll = 0, clock = 0, last = performance.now();
   let running = !reduced, paused = false;
+
+  const MAX_GLASS = 60;
+  const glassRectsData = new Float32Array(MAX_GLASS * 4);
+  const glassParamsData = new Float32Array(MAX_GLASS * 4);
 
   function resize(){
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5) * scale;
@@ -440,7 +570,82 @@ export function initOcean() {
     }
   }
 
+  /* Dynamically pass all DOM glass elements into the shader uniforms */
+  function updateGlass() {
+    const rawEls = document.querySelectorAll('.glass, .btn, .card .result, .chips b');
+    
+    // Sort array by layout z-index priority to handle UI overlapping correctly
+    let elsArray = [];
+    rawEls.forEach(el => {
+      let style = window.getComputedStyle(el);
+      let op = parseFloat(style.opacity);
+      if (isNaN(op)) op = 1.0;
+      if (op === 0 || style.visibility === 'hidden') return; 
+
+      let z = parseInt(style.zIndex);
+      if (isNaN(z)) {
+        if (el.closest('header') || el.closest('.sea-controls')) z = 100;
+        else z = 1;
+      }
+      elsArray.push({ el, style, z, op });
+    });
+
+    elsArray.sort((a, b) => a.z - b.z);
+
+    let count = 0;
+    const w = canvas.width;
+    const h = canvas.height;
+    const scaleX = w / window.innerWidth;
+    const scaleY = h / window.innerHeight;
+
+    for (let i = 0; i < elsArray.length; i++) {
+      if (count >= MAX_GLASS) break;
+      const { el, style, op } = elsArray[i];
+      const rect = el.getBoundingClientRect();
+      
+      // Viewport culling
+      if (rect.bottom < -150 || rect.top > window.innerHeight + 150) continue;
+      
+      let idx = count * 4;
+      glassRectsData[idx]   = rect.left * scaleX;
+      glassRectsData[idx+1] = h - (rect.bottom * scaleY); // WebGL Y goes bottom to top
+      glassRectsData[idx+2] = rect.width * scaleX;
+      glassRectsData[idx+3] = rect.height * scaleY;
+      
+      let br = parseFloat(style.borderRadius) || 0;
+      if (style.borderRadius.includes('%') || br > Math.min(rect.width, rect.height) / 2) {
+          br = Math.min(rect.width, rect.height) / 2;
+      }
+      glassParamsData[idx] = br * scaleX;
+      
+      let type = 0.0; // Panel Glass
+      if (el.classList.contains('btn')) {
+          type = el.classList.contains('ghost') ? 2.0 : 1.0;
+      } else if (el.classList.contains('result')) {
+          type = 3.0; // Green Gel
+      } else if (el.tagName.toLowerCase() === 'b') {
+          type = 4.0; // Chip Gel
+      }
+      glassParamsData[idx+1] = type;
+      glassParamsData[idx+2] = el.matches(':hover') ? 1.0 : 0.0;
+      glassParamsData[idx+3] = op; 
+      
+      count++;
+    }
+
+    currentMousePx.x += (clientMouse.x - currentMousePx.x) * 0.1;
+    currentMousePx.y += (clientMouse.y - currentMousePx.y) * 0.1;
+    const mx = currentMousePx.x * scaleX;
+    const my = h - (currentMousePx.y * scaleY);
+
+    gl.uniform1i(U.glassCount, count);
+    gl.uniform4fv(U.glassRects, glassRectsData);
+    gl.uniform4fv(U.glassParams, glassParamsData);
+    gl.uniform2f(U.mousePx, mx, my);
+  }
+
   function draw(){
+    updateGlass();
     gl.uniform2f(U.res, canvas.width, canvas.height);
     gl.uniform1f(U.time, clock);
     gl.uniform2f(U.mouse, mouse.x, mouse.y);
@@ -477,6 +682,8 @@ export function initOcean() {
   window.addEventListener('resize', () => { resize(); if (!running) draw(); });
 
   window.addEventListener('pointermove', (e) => {
+    clientMouse.x = e.clientX;
+    clientMouse.y = e.clientY;
     target.x = (e.clientX / window.innerWidth) * 2 - 1;
     target.y = -((e.clientY / window.innerHeight) * 2 - 1);
   }, { passive: true });
@@ -486,12 +693,11 @@ export function initOcean() {
     else if (!reduced && !paused){ running = true; last = performance.now(); requestAnimationFrame(frame); }
   });
 
-  /* when the animation loop is stopped, still repaint as the dive changes */
   Dive.onUpdate(() => { if (!running) { scroll = Math.min(window.scrollY / Math.max(window.innerHeight,1), 1.5); draw(); } });
 
   if (reduced){ draw(); } else { requestAnimationFrame(frame); }
 
-  /* ---- water controls (sliders & play/pause) ---- */
+  /* ---- water controls ---- */
   const ctrlChop = document.getElementById('ctrl-chop');
   const ctrlShallow = document.getElementById('ctrl-shallow');
   const ctrlPlay = document.getElementById('ctrl-play');
@@ -507,7 +713,7 @@ export function initOcean() {
     ctrlShallow.addEventListener('input', (e) => {
       shallowTarget = parseFloat(e.target.value) / 100;
       if (!running || paused) {
-        shallowCurrent = shallowTarget; // snap immediately if not rendering loop
+        shallowCurrent = shallowTarget; 
         draw();
       }
     });
