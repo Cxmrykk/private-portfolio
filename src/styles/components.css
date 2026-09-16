@@ -1,11 +1,11 @@
 /* ============================================================
-   Aqua glass surfaces (Now Powered by WebGL Shader)
+   Glass surfaces (drawn by the WebGL glass pass)
    ============================================================ */
 .glass{
   position:relative;
   border-radius:var(--panel-radius);
-  /* The WebGL ocean shader entirely processes and draws the 3D frosted glass, 
-     refraction, drop shadows, borders, and lighting for these panels. */
+  /* The glass pass draws the slab, its rim, refraction and shadow.
+     Nothing here may paint over it. */
   background:transparent !important;
   border:1px solid transparent !important;
   box-shadow:none !important;
@@ -27,7 +27,7 @@ body.is-underwater .glass{
   padding:12px 26px; border-radius:999px;
   font:600 15px/1 "Segoe UI",Tahoma,Verdana,sans-serif;
   text-decoration:none; color:#fff;
-  /* Powered by WebGL shader (Type 1 & 2) */
+  /* Drawn by the glass pass (type 1 gel, type 2 clear) */
   background:transparent !important;
   border:1px solid transparent !important;
   box-shadow:none !important;
@@ -41,28 +41,27 @@ body.is-underwater .glass{
   text-shadow:0 1px 0 rgba(255,255,255,.9);
 }
 
-/* ---------- project cards & chips ---------- */
+/* ---------- project cards ---------- */
 .card{padding:22px 24px 24px; display:flex; flex-direction:column; gap:12px}
 .card h3{margin:0; font-size:1.18rem; font-weight:600; color:var(--deep); letter-spacing:-.01em}
 .card p{margin:0; font-size:15px; color:var(--ink-soft)}
+
+/* Result pills and chips are printed flat onto the card: one
+   translucent fill, a hairline, no bevel and no shadow. */
 .card .result{
   display:inline-flex; align-items:center; justify-content:center; gap:8px;
   font-size:14.5px; color:#1d5c25; font-weight:600;
   padding:6px 13px; border-radius:999px; align-self:flex-start;
-  /* Powered by WebGL shader (Type 3) */
-  background:transparent !important;
-  border:1px solid transparent !important;
-  box-shadow:none !important;
+  background:rgba(124,201,63,.22);
+  border:1px solid rgba(90,170,50,.35);
 }
 .chips{display:flex; flex-wrap:wrap; gap:7px; margin-top:auto; padding-top:6px}
 .chips b{
   display:inline-flex; align-items:center; justify-content:center;
   font:500 12.5px/1 "Segoe UI",Tahoma,sans-serif; color:#0b4d78;
   padding:6px 11px; border-radius:999px;
-  /* Powered by WebGL shader (Type 4) */
-  background:transparent !important;
-  border:1px solid transparent !important;
-  box-shadow:none !important;
+  background:rgba(10,111,176,.10);
+  border:1px solid rgba(10,111,176,.18);
 }
 
 /* ---------- meters ---------- */

@@ -46,48 +46,8 @@ body.no-webgl.is-underwater{
 }
 body.is-underwater .atmosphere{opacity:0}
 
-/* ---------- caustic light dancing over the page, underwater only ---------- */
-.caustics{
-  position:fixed; inset:-25%; z-index:-1; pointer-events:none;
-  opacity:0; visibility:hidden;
-  mix-blend-mode:screen;
-  transition:opacity 1.4s ease, visibility 0s linear 1.4s;
-  background:
-    radial-gradient(55% 32% at 26% 18%, rgba(190,255,255,.17), rgba(190,255,255,0) 62%),
-    radial-gradient(42% 26% at 68% 42%, rgba(160,240,255,.15), rgba(160,240,255,0) 64%),
-    radial-gradient(48% 30% at 44% 78%, rgba(140,230,250,.12), rgba(140,230,250,0) 66%);
-  animation:causticDrift 28s ease-in-out infinite alternate;
-}
-body.is-underwater .caustics{opacity:1; visibility:visible; transition:opacity 1.4s ease, visibility 0s}
-@keyframes causticDrift{
-  0%{transform:translate3d(-2%,-1%,0) scale(1)}
-  50%{transform:translate3d(3%,2%,0) scale(1.06)}
-  100%{transform:translate3d(-1%,3%,0) scale(1.02)}
-}
-
-/* ---------- floating bubbles ---------- */
-.bubbles{
-  position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden;
-  opacity:0; visibility:hidden;
-  transition:opacity 1.1s ease, visibility 0s linear 1.1s;
-}
-body.is-underwater .bubbles{opacity:1; visibility:visible; transition:opacity 1.1s ease, visibility 0s}
-.bubbles b{
-  position:absolute; bottom:-18vh;
-  border-radius:50%;
-  background:
-    radial-gradient(circle at 32% 26%, rgba(255,255,255,.95), rgba(255,255,255,.25) 26%, rgba(150,220,255,.20) 58%, rgba(255,255,255,.35) 82%);
-  box-shadow:inset 0 -6px 12px rgba(10,90,140,.28), 0 4px 14px rgba(255,255,255,.22);
-  border:1px solid rgba(255,255,255,.55);
-  animation:rise linear infinite;
-  opacity:0;
-}
-@keyframes rise{
-  0%{transform:translate3d(0,0,0) scale(.85); opacity:0}
-  12%{opacity:.85}
-  88%{opacity:.7}
-  100%{transform:translate3d(var(--drift,24px),-124vh,0) scale(1.08); opacity:0}
-}
+/* Underwater caustics and bubbles are rendered in the ocean pass
+   (see ocean.glsl.js) so they stay behind the glass. */
 
 /* ---------- surface-break veil ---------- */
 .splash{
@@ -98,7 +58,5 @@ body.is-underwater .bubbles{opacity:1; visibility:visible; transition:opacity 1.
 
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
-  .bubbles{display:none}
-  .caustics{animation:none}
   *{animation-duration:.001ms !important; transition-duration:.001ms !important}
 }
