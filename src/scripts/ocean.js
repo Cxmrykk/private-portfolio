@@ -5,15 +5,6 @@ import { Dive } from './dive.js';
    + Hyperrealistic Frutiger Aero UI Overlay Renderer
    ============================================================ */
 export function initOcean() {
-  const canvas = document.getElementById('sea');
-  const gl = canvas.getContext('webgl2', {
-    antialias: true, 
-    alpha: false, depth: false, stencil: false,
-    powerPreference: 'high-performance'
-  });
-
-  if (!gl) { document.body.classList.add('no-webgl'); return; }
-
   /* ---- vertex: a single full-screen triangle, no buffers needed ---- */
   const VERT = `#version 300 es
   void main(){
@@ -33,6 +24,7 @@ export function initOcean() {
   uniform float uChop;
   uniform float uShallow;
   uniform float uDive;
+  uniform int   uLayerRender; // 0 = Base Layer, 1 = High-Z UI Transparent Layer
 
   // UI Glass Parameters
   #define MAX_GLASS 60
@@ -305,6 +297,24 @@ export function initOcean() {
   }
 
   void main(){
+    // Performance Optimization: Instantly drop non-UI pixels for the transparent UI canvas
+    if (uLayerRender == 1) {
+        bool inGlass = false;
+        for (int i = 0; i < MAX_GLASS; i++) {
+            if (i >= uGlassCount) break;
+            vec4 rect = uGlassRects[i];
+            float r = uGlassParams[i].x;
+            vec2 center = rect.xy + rect.zw * 0.5;
+            vec2 p = gl_FragCoord.xy - center;
+            vec2 distV = abs(p) - rect.zw * 0.5 + vec2(r);
+            float dist = min(max(distV.x, distV.y), 0.0) + length(max(distV, 0.0)) - r;
+            if (dist < 4.0) { // Slight margin for shadow bounds
+                inGlass = true; break;
+            }
+        }
+        if (!inGlass) discard;
+    }
+
     vec2 uv = (gl_FragCoord.xy * 2.0 - uRes) / uRes.y;
     float d = clamp(uDive, 0.0, 1.0);
     float sub = smoothstep(0.15, 0.60, d); 
@@ -362,38 +372,39 @@ export function initOcean() {
       }
     }
 
-    // Apply distortion locally to the raycast
     rd.xy += refrOffset;
     rd = normalize(rd);
 
-    /* --- Trace Background --- */
-    vec3 col;
-    if (ro.y < waveHeight(ro.xz, 5) - 0.02){
-      col = renderUnder(ro, rd);
-    } else {
-      vec3 p; float t = traceOcean(ro, rd, p);
-      if (t < 0.0){
-        col = sky(rd);
-      } else {
-        vec2 g; waveField(p.xz, t, 14, g);
-        vec3 n = normalize(vec3(-g.x, 1.0, -g.y));
-        col = shadeOcean(p, rd, n, t);
-      }
-    }
+    /* --- Trace Base Environment --- */
+    vec3 finalCol = vec3(0.0);
 
-    /* --- HDR Baseline / Grading --- */
-    float expo = mix(1.28, 1.58, sub);
-    col = 1.0 - exp(-col * expo);
-    col = pow(col, vec3(0.86));
-    col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, mix(1.12, 1.04, sub));
-    col *= 1.0 - 0.45 * sub * smoothstep(0.55, 1.85, length(uv));
+    if (uLayerRender == 0) {
+        if (ro.y < waveHeight(ro.xz, 5) - 0.02){
+          finalCol = renderUnder(ro, rd);
+        } else {
+          vec3 p; float t = traceOcean(ro, rd, p);
+          if (t < 0.0){
+            finalCol = sky(rd);
+          } else {
+            vec2 g; waveField(p.xz, t, 14, g);
+            vec3 n = normalize(vec3(-g.x, 1.0, -g.y));
+            finalCol = shadeOcean(p, rd, n, t);
+          }
+        }
+        
+        float expo = mix(1.28, 1.58, sub);
+        finalCol = 1.0 - exp(-finalCol * expo);
+        finalCol = pow(finalCol, vec3(0.86));
+        finalCol = mix(vec3(dot(finalCol, vec3(0.299, 0.587, 0.114))), finalCol, mix(1.12, 1.04, sub));
+        finalCol *= 1.0 - 0.45 * sub * smoothstep(0.55, 1.85, length(uv));
+    }
 
     /* ============================================================
        APPLY UI MATERIALS - Pass 2: Sequential Bottom-to-Top Blend
        ============================================================ */
-    vec3 finalCol = col;
+    vec3 pmColor = vec3(0.0);
+    float pmAlpha = 0.0;
 
-    // Elements are guaranteed dynamically sorted by layout Z-Index before being passed in
     for (int i = 0; i < MAX_GLASS; i++) {
         if (i >= uGlassCount) break;
         
@@ -412,12 +423,11 @@ export function initOcean() {
 
         float glassMask = smoothstep(1.0, -0.5, dist) * op;
 
-        // If pixel is within current UI element bounds
         if (glassMask > 0.0) {
-            vec2 localUV = (gl_FragCoord.xy - rect.xy) / gSize; // (0,0) bottom-left, (1,1) top-right
+            vec2 localUV = (gl_FragCoord.xy - rect.xy) / gSize; 
             vec3 glassCol = vec3(0.0);
+            float currentAlpha = 1.0;
             
-            // Recompute bounding gradient normal for 3D bevel specular logic
             vec2 signP = sign(p);
             vec2 gGrad = vec2(0.0);
             if (max(distV.x, distV.y) > 0.0) {
@@ -429,7 +439,6 @@ export function initOcean() {
             vec3 gNormal = normalize(vec3(gGrad * (1.0 - bevel), 2.5));
 
             if (type < 0.5) {
-                // Type 0: Glass Panel (Translucent)
                 vec3 cTop = vec3(1.0); float aTop = 0.86;
                 vec3 cMid = vec3(1.0); float aMid = 0.60;
                 vec3 cBot = vec3(0.87, 0.95, 1.0); float aBot = 0.66;
@@ -443,11 +452,14 @@ export function initOcean() {
                 gradC = mix(gradC, localUV.y > 0.54 ? mix(uMid, uTop, (localUV.y - 0.54)/0.46) : mix(uBot, uMid, localUV.y/0.54), diveFade);
                 gradA = mix(gradA, localUV.y > 0.54 ? mix(uaMid, uaTop, (localUV.y - 0.54)/0.46) : mix(uaBot, uaMid, localUV.y/0.54), diveFade);
 
-                // Blend pane opacity onto current physical environment (or underlying panes) 
-                glassCol = mix(finalCol, gradC, gradA);
-
+                if (uLayerRender == 0) {
+                    glassCol = mix(finalCol, gradC, gradA);
+                    currentAlpha = 1.0; 
+                } else {
+                    glassCol = gradC;
+                    currentAlpha = gradA;
+                }
             } else if (type < 1.5) {
-                // Type 1: Blue Gel Button (Opaque)
                 vec3 c1 = vec3(0.56, 0.86, 1.00);
                 vec3 c2 = vec3(0.18, 0.65, 0.91);
                 vec3 c3 = vec3(0.05, 0.46, 0.75);
@@ -455,59 +467,65 @@ export function initOcean() {
                 glassCol = localUV.y > 0.52 ? mix(c2, c1, (localUV.y - 0.52)/0.48) : mix(c4, c3, localUV.y/0.52);
                 if (hover > 0.5) glassCol = mix(glassCol, vec3(1.0), 0.12);
             } else if (type < 2.5) {
-                // Type 2: Ghost Gel Button (Opaque)
                 vec3 topG = vec3(1.0);
                 vec3 midG = vec3(0.85, 0.94, 0.99);
                 vec3 botG = vec3(0.74, 0.89, 0.97);
                 glassCol = localUV.y > 0.5 ? mix(midG, topG, (localUV.y - 0.5)/0.5) : mix(botG, midG, localUV.y/0.5);
                 if (hover > 0.5) glassCol = mix(glassCol, vec3(1.0), 0.2);
             } else if (type < 3.5) {
-                // Type 3: Green Result Gel (Opaque)
                 vec3 topGr = vec3(0.93, 0.99, 0.88);
                 vec3 botGr = vec3(0.80, 0.94, 0.70);
                 glassCol = mix(botGr, topGr, localUV.y);
             } else {
-                // Type 4: Light Blue Chip Gel (Opaque)
                 glassCol = mix(vec3(0.81, 0.92, 0.98), vec3(1.0), localUV.y);
             }
 
-            // Inner Shadow (Bottom edge shading for depth)
+            // Inner Shadow
             float innerDark = smoothstep(0.0, -6.0, dist) * smoothstep(0.4, 0.0, localUV.y);
             glassCol *= mix(1.0, 0.7, innerDark);
 
-            // Sweeping Parabolic Aqua Gloss Cap 
-            // Evaluated via dynamic pixel boundaries so it won't stretch awkwardly inside huge cards
+            // Parabolic Cap
             float maxCapHeight = min(gSize.y * 0.44, type < 0.5 ? 60.0 : 25.0);
             float edgeCapHeight = maxCapHeight * 0.65;
             float capDip = maxCapHeight - edgeCapHeight;
             float currentCapHeight = maxCapHeight - capDip * pow(abs(localUV.x - 0.5) * 2.0, 2.0);
             float distFromTop = gSize.y * (1.0 - localUV.y);
-            
             if (distFromTop < currentCapHeight) {
                 float capT = 1.0 - (distFromTop / currentCapHeight);
                 float capAlpha = mix(0.0, 0.7, capT);
                 glassCol = mix(glassCol, vec3(1.0), capAlpha);
             }
 
-            // Clean subtle border
+            // Border
             float border = smoothstep(0.0, -1.0, dist) - smoothstep(-1.5, -3.0, dist);
             glassCol = mix(glassCol, vec3(1.0), border * (type < 0.5 ? 0.8 : 0.4));
 
-            // 3D Specular Point Light (Tracking Mouse)
+            // Specular
             vec3 lightDir = normalize(vec3(uMousePx - gl_FragCoord.xy, 600.0));
             vec3 halfDir = normalize(lightDir + vec3(0.0, 0.0, 1.0));
-            float spec = pow(max(dot(gNormal, halfDir), 0.0), 180.0);
-            glassCol += spec * (type < 0.5 ? 0.5 : 0.3); // Kept subtle to avoid blowing out buttons
+            float spec = pow(max(dot(gNormal, halfDir), 0.0), 180.0) * (type < 0.5 ? 0.5 : 0.3);
 
-            // Sequentially overwrite finalCol to correctly compound opacities overlapping in Z-space
-            finalCol = mix(finalCol, glassCol, glassMask);
+            if (uLayerRender == 0) {
+                glassCol += spec;
+                finalCol = mix(finalCol, glassCol, glassMask);
+            } else {
+                float a = currentAlpha * glassMask;
+                // Accumulate color via source-over pre-multiplied logic, handling additive speculars seamlessly
+                vec3 c = glassCol * a + vec3(1.0) * spec * glassMask;
+                pmColor = c + pmColor * (1.0 - a);
+                pmAlpha = a + pmAlpha * (1.0 - a);
+            }
         }
     }
 
-    fragColor = vec4(clamp(finalCol, 0.0, 1.0), 1.0);
+    if (uLayerRender == 1) {
+        fragColor = vec4(pmColor, pmAlpha);
+    } else {
+        fragColor = vec4(clamp(finalCol, 0.0, 1.0), 1.0);
+    }
   }`;
 
-  function compile(type, src){
+  function compile(gl, type, src){
     const sh = gl.createShader(type);
     gl.shaderSource(sh, src);
     gl.compileShader(sh);
@@ -517,65 +535,145 @@ export function initOcean() {
     }
     return sh;
   }
-  const vs = compile(gl.VERTEX_SHADER, VERT);
-  const fs = compile(gl.FRAGMENT_SHADER, FRAG);
-  if (!vs || !fs){ document.body.classList.add('no-webgl'); return; }
 
-  const prog = gl.createProgram();
-  gl.attachShader(prog, vs);
-  gl.attachShader(prog, fs);
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)){
-    console.error(gl.getProgramInfoLog(prog));
+  // Generate independent rendering contexts that share the unified physics loop
+  function createRenderer(canvasId, isUI) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return null;
+    
+    const gl = canvas.getContext('webgl2', {
+      antialias: true, 
+      alpha: isUI, 
+      depth: false, stencil: false,
+      powerPreference: 'high-performance'
+    });
+
+    if (!gl) return null;
+
+    const vs = compile(gl, gl.VERTEX_SHADER, VERT);
+    const fs = compile(gl, gl.FRAGMENT_SHADER, FRAG);
+    if (!vs || !fs) return null;
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)){
+      console.error(gl.getProgramInfoLog(prog));
+      return null;
+    }
+    gl.useProgram(prog);
+    gl.bindVertexArray(gl.createVertexArray());
+
+    const MAX_GLASS = 60;
+    const glassRectsData = new Float32Array(MAX_GLASS * 4);
+    const glassParamsData = new Float32Array(MAX_GLASS * 4);
+
+    const U = {
+      res:         gl.getUniformLocation(prog, 'uRes'),
+      time:        gl.getUniformLocation(prog, 'uTime'),
+      mouse:       gl.getUniformLocation(prog, 'uMouse'),
+      mousePx:     gl.getUniformLocation(prog, 'uMousePx'),
+      scroll:      gl.getUniformLocation(prog, 'uScroll'),
+      chop:        gl.getUniformLocation(prog, 'uChop'),
+      shallow:     gl.getUniformLocation(prog, 'uShallow'),
+      dive:        gl.getUniformLocation(prog, 'uDive'),
+      glassRects:  gl.getUniformLocation(prog, 'uGlassRects'),
+      glassParams: gl.getUniformLocation(prog, 'uGlassParams'),
+      glassCount:  gl.getUniformLocation(prog, 'uGlassCount'),
+      layerRender: gl.getUniformLocation(prog, 'uLayerRender')
+    };
+
+    function resize(w, h){
+      if (canvas.width !== w || canvas.height !== h){
+        canvas.width = w; canvas.height = h;
+        gl.viewport(0, 0, w, h);
+      }
+    }
+
+    function draw(elsArray, clock, mx, my, mPxX, mPxY, scroll, chop, shallowCurrent, diveValue, scaleX, scaleY) {
+      gl.useProgram(prog);
+      
+      let count = 0;
+      const h = canvas.height;
+
+      for (let i = 0; i < elsArray.length; i++) {
+        if (count >= MAX_GLASS) break;
+        const { el, style, op } = elsArray[i];
+        const rect = el.getBoundingClientRect();
+        
+        // Viewport culling
+        if (rect.bottom < -150 || rect.top > window.innerHeight + 150) continue;
+        
+        let idx = count * 4;
+        glassRectsData[idx]   = rect.left * scaleX;
+        glassRectsData[idx+1] = h - (rect.bottom * scaleY); 
+        glassRectsData[idx+2] = rect.width * scaleX;
+        glassRectsData[idx+3] = rect.height * scaleY;
+        
+        let br = parseFloat(style.borderRadius) || 0;
+        if (style.borderRadius.includes('%') || br > Math.min(rect.width, rect.height) / 2) {
+            br = Math.min(rect.width, rect.height) / 2;
+        }
+        glassParamsData[idx] = br * scaleX;
+        
+        let type = 0.0; // Panel Glass
+        if (el.classList.contains('btn')) {
+            type = el.classList.contains('ghost') ? 2.0 : 1.0;
+        } else if (el.classList.contains('result')) {
+            type = 3.0; // Green Gel
+        } else if (el.tagName.toLowerCase() === 'b') {
+            type = 4.0; // Chip Gel
+        }
+        glassParamsData[idx+1] = type;
+        glassParamsData[idx+2] = el.matches(':hover') ? 1.0 : 0.0;
+        glassParamsData[idx+3] = op; 
+        
+        count++;
+      }
+
+      gl.uniform1i(U.glassCount, count);
+      gl.uniform4fv(U.glassRects, glassRectsData);
+      gl.uniform4fv(U.glassParams, glassParamsData);
+      
+      gl.uniform2f(U.res, canvas.width, canvas.height);
+      gl.uniform1f(U.time, clock);
+      gl.uniform2f(U.mouse, mx, my);
+      gl.uniform2f(U.mousePx, mPxX * scaleX, h - (mPxY * scaleY));
+      gl.uniform1f(U.scroll, scroll);
+      gl.uniform1f(U.chop, chop);
+      gl.uniform1f(U.shallow, shallowCurrent);
+      gl.uniform1f(U.dive, diveValue);
+      gl.uniform1i(U.layerRender, isUI ? 1 : 0);
+
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    return { canvas, resize, draw };
+  }
+
+  const baseRenderer = createRenderer('sea', false);
+  const uiRenderer = createRenderer('ui-glass', true);
+
+  if (!baseRenderer || !uiRenderer) {
     document.body.classList.add('no-webgl');
     return;
   }
-  gl.useProgram(prog);
-  gl.bindVertexArray(gl.createVertexArray());
-
-  const U = {
-    res:         gl.getUniformLocation(prog, 'uRes'),
-    time:        gl.getUniformLocation(prog, 'uTime'),
-    mouse:       gl.getUniformLocation(prog, 'uMouse'),
-    mousePx:     gl.getUniformLocation(prog, 'uMousePx'),
-    scroll:      gl.getUniformLocation(prog, 'uScroll'),
-    chop:        gl.getUniformLocation(prog, 'uChop'),
-    shallow:     gl.getUniformLocation(prog, 'uShallow'),
-    dive:        gl.getUniformLocation(prog, 'uDive'),
-    glassRects:  gl.getUniformLocation(prog, 'uGlassRects'),
-    glassParams: gl.getUniformLocation(prog, 'uGlassParams'),
-    glassCount:  gl.getUniformLocation(prog, 'uGlassCount')
-  };
 
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let scale = window.innerWidth > 1500 ? 0.72 : 0.85;
   let chop = 1.0, target = { x: 0, y: 0 }, mouse = { x: 0, y: 0 };
   let clientMouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-  let currentMousePx = { x: canvas.width / 2, y: canvas.height / 2 };
+  let currentMousePx = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
   let shallowTarget = 0.0, shallowCurrent = 0.0;
   let scroll = 0, clock = 0, last = performance.now();
   let running = !reduced, paused = false;
 
-  const MAX_GLASS = 60;
-  const glassRectsData = new Float32Array(MAX_GLASS * 4);
-  const glassParamsData = new Float32Array(MAX_GLASS * 4);
-
-  function resize(){
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5) * scale;
-    const w = Math.max(1, Math.round(window.innerWidth * dpr));
-    const h = Math.max(1, Math.round(window.innerHeight * dpr));
-    if (canvas.width !== w || canvas.height !== h){
-      canvas.width = w; canvas.height = h;
-      gl.viewport(0, 0, w, h);
-    }
-  }
-
-  /* Dynamically pass all DOM glass elements into the shader uniforms */
-  function updateGlass() {
+  function updateGlassAndDraw() {
     const rawEls = document.querySelectorAll('.glass, .btn, .card .result, .chips b');
+    let baseEls = [];
+    let uiEls = [];
     
-    // Sort array by layout z-index priority to handle UI overlapping correctly
-    let elsArray = [];
     rawEls.forEach(el => {
       let style = window.getComputedStyle(el);
       let op = parseFloat(style.opacity);
@@ -587,73 +685,29 @@ export function initOcean() {
         if (el.closest('header') || el.closest('.sea-controls')) z = 100;
         else z = 1;
       }
-      elsArray.push({ el, style, z, op });
+      
+      let item = { el, style, z, op };
+      if (z >= 20) uiEls.push(item);
+      else baseEls.push(item);
     });
 
-    elsArray.sort((a, b) => a.z - b.z);
-
-    let count = 0;
-    const w = canvas.width;
-    const h = canvas.height;
-    const scaleX = w / window.innerWidth;
-    const scaleY = h / window.innerHeight;
-
-    for (let i = 0; i < elsArray.length; i++) {
-      if (count >= MAX_GLASS) break;
-      const { el, style, op } = elsArray[i];
-      const rect = el.getBoundingClientRect();
-      
-      // Viewport culling
-      if (rect.bottom < -150 || rect.top > window.innerHeight + 150) continue;
-      
-      let idx = count * 4;
-      glassRectsData[idx]   = rect.left * scaleX;
-      glassRectsData[idx+1] = h - (rect.bottom * scaleY); // WebGL Y goes bottom to top
-      glassRectsData[idx+2] = rect.width * scaleX;
-      glassRectsData[idx+3] = rect.height * scaleY;
-      
-      let br = parseFloat(style.borderRadius) || 0;
-      if (style.borderRadius.includes('%') || br > Math.min(rect.width, rect.height) / 2) {
-          br = Math.min(rect.width, rect.height) / 2;
-      }
-      glassParamsData[idx] = br * scaleX;
-      
-      let type = 0.0; // Panel Glass
-      if (el.classList.contains('btn')) {
-          type = el.classList.contains('ghost') ? 2.0 : 1.0;
-      } else if (el.classList.contains('result')) {
-          type = 3.0; // Green Gel
-      } else if (el.tagName.toLowerCase() === 'b') {
-          type = 4.0; // Chip Gel
-      }
-      glassParamsData[idx+1] = type;
-      glassParamsData[idx+2] = el.matches(':hover') ? 1.0 : 0.0;
-      glassParamsData[idx+3] = op; 
-      
-      count++;
-    }
+    baseEls.sort((a, b) => a.z - b.z);
+    uiEls.sort((a, b) => a.z - b.z);
 
     currentMousePx.x += (clientMouse.x - currentMousePx.x) * 0.1;
     currentMousePx.y += (clientMouse.y - currentMousePx.y) * 0.1;
-    const mx = currentMousePx.x * scaleX;
-    const my = h - (currentMousePx.y * scaleY);
 
-    gl.uniform1i(U.glassCount, count);
-    gl.uniform4fv(U.glassRects, glassRectsData);
-    gl.uniform4fv(U.glassParams, glassParamsData);
-    gl.uniform2f(U.mousePx, mx, my);
-  }
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5) * scale;
+    const w = Math.max(1, Math.round(window.innerWidth * dpr));
+    const h = Math.max(1, Math.round(window.innerHeight * dpr));
+    const scaleX = w / window.innerWidth;
+    const scaleY = h / window.innerHeight;
 
-  function draw(){
-    updateGlass();
-    gl.uniform2f(U.res, canvas.width, canvas.height);
-    gl.uniform1f(U.time, clock);
-    gl.uniform2f(U.mouse, mouse.x, mouse.y);
-    gl.uniform1f(U.scroll, scroll);
-    gl.uniform1f(U.chop, chop);
-    gl.uniform1f(U.shallow, shallowCurrent);
-    gl.uniform1f(U.dive, Dive.value);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    baseRenderer.resize(w, h);
+    baseRenderer.draw(baseEls, clock, mouse.x, mouse.y, currentMousePx.x, currentMousePx.y, scroll, chop, shallowCurrent, Dive.value, scaleX, scaleY);
+
+    uiRenderer.resize(w, h);
+    uiRenderer.draw(uiEls, clock, mouse.x, mouse.y, currentMousePx.x, currentMousePx.y, scroll, chop, shallowCurrent, Dive.value, scaleX, scaleY);
   }
 
   let slow = 0, downshifted = false;
@@ -664,7 +718,7 @@ export function initOcean() {
     if (!paused) clock += dt;
 
     if (dt > 0.032){ slow++; } else { slow = Math.max(0, slow - 1); }
-    if (slow > 45 && !downshifted){ downshifted = true; scale = 0.5; resize(); }
+    if (slow > 45 && !downshifted){ downshifted = true; scale = 0.5; }
 
     mouse.x += (target.x - mouse.x) * 0.045;
     mouse.y += (target.y - mouse.y) * 0.045;
@@ -674,12 +728,12 @@ export function initOcean() {
 
     shallowCurrent += (shallowTarget - shallowCurrent) * 0.04;
 
-    draw();
+    updateGlassAndDraw();
     if (running) requestAnimationFrame(frame);
   }
 
-  resize();
-  window.addEventListener('resize', () => { resize(); if (!running) draw(); });
+  updateGlassAndDraw();
+  window.addEventListener('resize', () => { if (!running) updateGlassAndDraw(); });
 
   window.addEventListener('pointermove', (e) => {
     clientMouse.x = e.clientX;
@@ -693,9 +747,9 @@ export function initOcean() {
     else if (!reduced && !paused){ running = true; last = performance.now(); requestAnimationFrame(frame); }
   });
 
-  Dive.onUpdate(() => { if (!running) { scroll = Math.min(window.scrollY / Math.max(window.innerHeight,1), 1.5); draw(); } });
+  Dive.onUpdate(() => { if (!running) { scroll = Math.min(window.scrollY / Math.max(window.innerHeight,1), 1.5); updateGlassAndDraw(); } });
 
-  if (reduced){ draw(); } else { requestAnimationFrame(frame); }
+  if (reduced){ updateGlassAndDraw(); } else { requestAnimationFrame(frame); }
 
   /* ---- water controls ---- */
   const ctrlChop = document.getElementById('ctrl-chop');
@@ -705,7 +759,7 @@ export function initOcean() {
   if (ctrlChop) {
     ctrlChop.addEventListener('input', (e) => {
       chop = parseFloat(e.target.value) / 100;
-      if (!running || paused) draw();
+      if (!running || paused) updateGlassAndDraw();
     });
   }
 
@@ -714,7 +768,7 @@ export function initOcean() {
       shallowTarget = parseFloat(e.target.value) / 100;
       if (!running || paused) {
         shallowCurrent = shallowTarget; 
-        draw();
+        updateGlassAndDraw();
       }
     });
   }
