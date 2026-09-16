@@ -42,13 +42,12 @@ float sdRect(vec2 p, vec2 hs, float r, out vec2 grad){
 }
 
 /* where the environment's light sits on screen, in canvas px:
-   the sun above the surface, the light shaft once submerged.
-   Uses the ocean pass's camera pitch so it matches the sky. */
+   the sun/moon above the surface, the light shaft once submerged. */
 vec2 lightScreenPos(float d){
   float pitch = mix(-0.085 - uScroll * 0.02, 0.0, smoothstep(0.0, 0.45, d))
               + smoothstep(0.30, 0.62, d) * (1.0 - smoothstep(0.70, 1.0, d) * 0.66) * 0.30
               + uMouse.y * 0.035;
-  vec3 D = normalize(mix(SUN, SHAFT, smoothstep(0.15, 0.60, d)));
+  vec3 D = normalize(mix(getPrimaryLight(), getShaftDir(), smoothstep(0.15, 0.60, d)));
   vec2 uv = D.xy / max(-D.z, 0.05) * 1.45;
   uv.y -= pitch;
   return (uv * uRes.y + uRes) * 0.5;
@@ -56,10 +55,6 @@ vec2 lightScreenPos(float d){
 
 float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
 
-/* what the glass reflects. Kept nearly neutral so Fresnel adds light,
-   not colour: above the surface a bright pale sky when the reflected
-   ray goes up and a grey-blue floor when it goes down; once submerged,
-   a desaturated water field that brightens toward the surface */
 vec3 envReflect(vec3 R, float dive){
   vec3 skyC = sky(normalize(vec3(R.x * 0.9, max(R.y, 0.0) * 0.85 + 0.06, -0.5)));
   skyC = pow(1.0 - exp(-skyC * 1.28), vec3(0.86));
@@ -71,16 +66,6 @@ vec3 envReflect(vec3 R, float dive){
   return mix(above, below, dive);
 }
 
-/* per-type material
-   type 0: clear panel     type 1: gel button
-   type 2: clear button    type 3: thin clear card
-   tintW    — how much of the slab is its own colour. 0 for clear glass:
-              the scene passes through untouched. Only the gel pill is coloured.
-   frostLod — mip level sampled on the face (0: optically clear)
-   shadowW  — strength of the shadow below the slab
-   gel      — 1 for buttons (no bubbles)
-   bevK     — bevel radius as a fraction of the element's half-size
-   thick    — slab thickness in bevel radii (drives the refraction) */
 void material(float type, vec2 lu, float hover, float dive,
               out vec3 tint, out float tintW, out float frostLod, out float shadowW,
               out float gel, out float bevK, out float thick){
@@ -124,7 +109,6 @@ void main(){
   vec2  texel = 1.0 / uRes;
   float margin = 28.0 * uPx;
 
-  /* UI layer: drop every pixel not near a panel (or its shadow) */
   if (uLayerRender == 1){
     bool near = false;
     for (int i = 0; i < MAX_GLASS; i++){
@@ -139,30 +123,30 @@ void main(){
   float dive = clamp(uDive, 0.0, 1.0);
   float diveFade = smoothstep(0.0, 0.5, dive);
 
-  /* ---- the environment's light ----
-     warm sun above the surface, cool shaft light below; underwater
-     the intensity shimmers gently with the caustic field. The glass
-     itself throws near-white highlights whatever the light's colour. */
+  /* ---- dynamic environment light ---- */
   vec3  V      = vec3(0.0, 0.0, 1.0);
   vec2  sunPx  = lightScreenPos(dive);
-  vec3  sunCol = mix(vec3(1.00, 0.97, 0.90), vec3(0.72, 0.95, 1.00), diveFade);
+  float envLightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
+  vec3  primaryCol = getPrimaryLightCol();
+  vec3  sunCol = mix(primaryCol, vec3(0.72, 0.95, 1.00) * envLightI, diveFade);
   vec3  hiCol  = mix(sunCol, vec3(1.0), 0.7);
-  float dapple = getCaustics(fc * texel * vec2(uRes.x / uRes.y, 1.0) * 4.5 + vec2(0.0, uScroll * 0.4));
-  float lightI = mix(1.0, 0.82 + 0.50 * dapple, diveFade);
-  vec3  Ls     = normalize(vec3(sunPx - fc, 900.0 * uPx)); // the light as a screen-space point
-  vec3  Hsun   = normalize(Ls + V);
-  vec3  Ls2    = normalize(vec3(fc - sunPx, 900.0 * uPx)); // the light seen off the inside of the back face
-  vec3  Hsun2  = normalize(Ls2 + V);
-  float sunNear = exp(-length(sunPx - fc) / (1100.0 * uPx));  // brighter near the light
-  float oShare = (uLayerRender == 0) ? 1.0 : 0.45; // transmitted light that is our ocean vs the DOM
 
-  /* cursor: a soft highlight that rides the bevel, a faint glow on the face */
+  float dapple = getCaustics(fc * texel * vec2(uRes.x / uRes.y, 1.0) * 4.5 + vec2(0.0, uScroll * 0.4));
+  float lightI = mix(1.0, 0.82 + 0.50 * dapple, diveFade) * envLightI;
+  
+  vec3  Ls     = normalize(vec3(sunPx - fc, 900.0 * uPx));
+  vec3  Hsun   = normalize(Ls + V);
+  vec3  Ls2    = normalize(vec3(fc - sunPx, 900.0 * uPx));
+  vec3  Hsun2  = normalize(Ls2 + V);
+  float sunNear = exp(-length(sunPx - fc) / (1100.0 * uPx));
+  float oShare = (uLayerRender == 0) ? 1.0 : 0.45;
+
+  /* cursor glow */
   float curD = length(uCursor.xy - fc);
   float curW = exp(-curD / (320.0 * uPx)) * uCursor.z;
   vec3  Lc = normalize(vec3(uCursor.xy - fc, 300.0 * uPx));
   vec3  Hc = normalize(Lc + V);
 
-  /* geometry, in canvas px */
   float shadowReach = 14.0 * uPx;
   float reach = shadowReach + 8.0 * uPx;
 
@@ -190,16 +174,15 @@ void main(){
     float inside = 1.0 - smoothstep(-0.5, 0.5, dist);
     float mask = inside * op;
     vec2  lu = (fc - rect.xy) / rect.zw;
-    vec2  pn = p / hs;                                        // -1..1 across the face
-    vec2  L2 = normalize(sunPx - center + vec2(0.0, 0.001));  // panel-to-light, in the plane
+    vec2  pn = p / hs;                                        
+    vec2  L2 = normalize(sunPx - center + vec2(0.0, 0.001));  
 
     vec3 tint; float tintW, frostLod, shadowW, gel, bevK, thick;
     material(type, lu, hover, diveFade, tint, tintW, frostLod, shadowW, gel, bevK, thick);
     float lI   = lightI * (1.0 + 0.15 * hover);
-    float lift = (type > 0.5 && type < 1.5) ? 0.0 : 0.04 * hover;   // clear glass on hover: a touch brighter
+    float lift = (type > 0.5 && type < 1.5) ? 0.0 : 0.04 * hover;   
     float bev  = clamp(min(hs.x, hs.y) * bevK, 6.0 * uPx, 30.0 * uPx);
 
-    /* ---- shadow cast away from the light, and the caustic the slab focuses on its far side ---- */
     if (shadowW > 0.0){
       vec2  gS; float dS = sdRect(p + L2 * 3.0 * uPx, hs, r, gS);
       float outsideW = op * (1.0 - inside);
@@ -213,29 +196,21 @@ void main(){
 
     if (mask <= 0.0005) continue;
 
-    /* ---- bevel geometry: a quarter-round of radius bev at the rim.
-            s is the sine of the angle of incidence: 0 on the flat face,
-            1 at the silhouette, where the surface turns away from us ---- */
     float s    = smoothstep(-bev, 0.0, dist);
     float face = 1.0 - s;
     float sI   = min(s, 0.985);
     float cI   = sqrt(1.0 - sI * sI);
     vec3  N    = vec3(grad * sI, cI);
-    float fres = 0.04 + 0.96 * pow(1.0 - cI, 5.0);            // Schlick
-    float facing = dot(grad, L2) * 0.5 + 0.5;                  // 1 on the side of the rim that faces the light
+    float fres = 0.04 + 0.96 * pow(1.0 - cI, 5.0);            
+    float facing = dot(grad, L2) * 0.5 + 0.5;                  
 
-    /* ---- Snell: the ray bends toward the normal on entry, crosses the slab,
-            leaves through the flat back face and continues to the scene behind.
-            Near the silhouette the exit angle grazes and the scene compresses
-            hard, as it does at the edge of a sphere; the shift saturates
-            smoothly so it never explodes. ---- */
     float sT    = sI / IOR;
     float tanT  = sT / sqrt(1.0 - sT * sT);
     float tanI  = sI / cI;
     float raw   = thick * tanT + 0.6 * tanI;
     float shift = bev * 3.4 * (1.0 - exp(-raw / 3.4));
-    float disp  = 0.05 * s * (0.4 + 0.6 * facing);             // rainbow on the lit side of the bevel
-    vec2  base  = (center + p * 0.96) * texel;                  // thick pane: the scene looks a touch larger
+    float disp  = 0.05 * s * (0.4 + 0.6 * facing);             
+    vec2  base  = (center + p * 0.96) * texel;                  
     vec2  refr  = -grad * shift * texel;
     float lod   = frostLod * face;
 
@@ -243,32 +218,21 @@ void main(){
                      textureLod(uOcean, base + refr,                lod).g,
                      textureLod(uOcean, base + refr * (1.0 + disp), lod).b);
     vec3 rim0 = textureLod(uOcean, base, lod).rgb;
-    /* a lower slab already covers this pixel: keep its colour, add only the refraction delta */
     vec3 bg = mix(rimS, col + (rimS - rim0), covered);
 
-    /* ---- what passes through. Clear glass adds no colour: tintW is 0 for
-            everything but the gel pill, so body is simply the scene ---- */
     float wT = tintW, wO = (1.0 - tintW) * oShare;
     float srcA = wT + wO;
     vec3  body = (tint * wT + bg * wO) / srcA;
 
-    /* the scene inside a thick slab looks a shade crisper than the scene outside */
     body = mix(body, (body - 0.5) * 1.08 + 0.5, face * (1.0 - tintW));
     body += lift * face;
-
-    /* the only colour the glass contributes: a trace of cyan in the thickest part of the bevel */
     body *= pow(vec3(0.975, 1.0, 1.0), vec3(3.0 * s * s));
 
-    /* ---- the face is very slightly pillowed and reflects the broad light of the
-            sky: a soft white sheen that sits toward the light and fades across ---- */
     vec3  Nf    = normalize(vec3(pn * 0.10, 1.0));
     float sheen = pow(clamp(dot(Nf, Hsun), 0.0, 1.0), 6.0) * 0.16 * lI * (0.4 + 0.6 * sunNear) * face;
     body += hiCol * sheen;
-
-    /* ---- caustics playing over the face once underwater ---- */
     body += hiCol * dapple * 0.06 * diveFade * face;
 
-    /* ---- bubbles trapped in the glass (panels and cards) ---- */
     if (gel < 0.5){
       for (int b = 0; b < GLASS_BUBBLES; b++){
         float fb = float(b) * 7.0 + float(i) * 13.0;
@@ -289,12 +253,9 @@ void main(){
       }
     }
 
-    /* ---- thickness: just inside the rim the compressed scene sits a shade
-            darker, more so on the side away from the light ---- */
     float band = smoothstep(0.12, 0.50, s) * (1.0 - smoothstep(0.50, 0.92, s));
     body *= 1.0 - band * 0.16 * (1.0 - 0.5 * facing);
 
-    /* ---- Fresnel of a neutral environment: adds light, not colour ---- */
     vec3  R = reflect(-V, N);
     vec3  env = envReflect(R, diveFade);
     if (uLayerRender == 0){
@@ -303,27 +264,19 @@ void main(){
     }
     body = mix(body, env, fres);
 
-    /* ---- the rim: light trapped in the rounded edge. A luminous band on the
-            outer third of the bevel, pale where it mirrors the sky, dim where
-            it mirrors the floor, white where it faces the light ---- */
     float rimGlow = smoothstep(0.62, 0.97, s);
     vec3  rimC = mix(env, hiCol, 0.45 * facing * (0.5 + 0.5 * lI));
     body = mix(body, rimC, rimGlow * 0.60);
 
-    /* a hair of shadow at the very silhouette separates the bright rim from the scene */
     float sil = exp(-pow((dist + 0.5 * uPx) / (0.8 * uPx), 2.0));
     body *= 1.0 - sil * 0.18;
 
-    /* ---- highlights: Blinn lobes on the bevel where it faces the light, with
-            a broad bloom around them, and a fainter one on the far rim where
-            the light reflects off the inside of the back face ---- */
     float ndh   = clamp(dot(N, Hsun),  0.0, 1.0);
     float ndh2  = clamp(dot(N, Hsun2), 0.0, 1.0);
     float specS = (pow(ndh, 90.0) * 1.10 + pow(ndh, 12.0) * 0.22 + pow(ndh, 3.0) * 0.06) * s;
     float specB = (pow(ndh2, 60.0) * 0.30 + pow(ndh2, 10.0) * 0.06) * s;
     float specL = (specS + specB) * lI * (0.45 + 0.55 * sunNear);
 
-    /* cursor: a highlight on the bevel and a soft glow on the face */
     float specC   = pow(clamp(dot(N, Hc), 0.0, 1.0), 40.0) * 0.35 * curW * s;
     float curFace = curW * 0.06 * face;
 
@@ -341,7 +294,6 @@ void main(){
   }
 
   if (uLayerRender == 1){
-    /* additive light over transparency becomes an opaque bright pixel, which keeps premultiplied colour valid */
     alpha = clamp(max(alpha, max(col.r, max(col.g, col.b))), 0.0, 1.0);
     fragColor = vec4(min(col, vec3(1.0)), alpha);
   } else {

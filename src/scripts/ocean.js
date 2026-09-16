@@ -21,6 +21,7 @@ export function initOcean(){
 
   const state = {
     clock: 0,
+    dayTime: 12.0,                   // 24-hour cycle: 12 = noon
     mouseX: 0, mouseY: 0,            // parallax, normalised -1..1
     cursorX: -1e4, cursorY: -1e4,    // pointer light, CSS px
     cursorOn: 0,
@@ -31,6 +32,30 @@ export function initOcean(){
   let last = performance.now();
   let running = !reduced, paused = false;
   let slow = 0, downshifted = false;
+
+  let manualTimeOverride = false;
+  let overrideTimeout = null;
+  const ctrlTime = document.getElementById('ctrl-time');
+
+  function updateCSSColors(dayTime) {
+    const sunY = Math.sin((dayTime - 6.0) / 24.0 * Math.PI * 2) * 0.8;
+    const dayW = Math.max(0, Math.min(1, (sunY - (-0.1)) / 0.3));
+    const sunsetW = Math.max(0, Math.min(1, (sunY - (-0.2)) / 0.3)) * (1.0 - Math.max(0, Math.min(1, (sunY - 0.1) / 0.3)));
+    const nightW = 1.0 - Math.max(0, Math.min(1, (sunY - (-0.2)) / 0.2));
+
+    const lerp = (c1, c2, c3, w1, w2, w3) => c1.map((v, i) => Math.round(v * w1 + c2[i] * w2 + c3[i] * w3));
+    
+    const dayZ = [25, 102, 204]; const dayH = [194, 234, 252];
+    const setZ = [38, 64, 153];  const setH = [255, 115, 38];
+    const nigZ = [3, 5, 13];     const nigH = [13, 25, 38];
+
+    const z = lerp(dayZ, setZ, nigZ, dayW, sunsetW, nightW);
+    const h = lerp(dayH, setH, nigH, dayW, sunsetW, nightW);
+
+    document.documentElement.style.setProperty('--sky-zenith', `rgb(${z[0]},${z[1]},${z[2]})`);
+    document.documentElement.style.setProperty('--sky-horizon', `rgb(${h[0]},${h[1]},${h[2]})`);
+    document.documentElement.style.setProperty('--light-blend', (dayW + sunsetW).toFixed(3));
+  }
 
   function render(){
     const layers = scanGlass();
@@ -44,7 +69,14 @@ export function initOcean(){
   function frame(now){
     const dt = Math.min((now - last) / 1000, 0.05);
     last = now;
-    if (!paused) state.clock += dt;
+
+    if (!paused) {
+      state.clock += dt;
+      if (!manualTimeOverride) {
+        state.dayTime = (state.dayTime + dt * 0.6) % 24.0; // 0.6 hours per sec (40s for full loop)
+        if (ctrlTime) ctrlTime.value = state.dayTime * 100;
+      }
+    }
 
     if (dt > 0.032){ slow++; } else { slow = Math.max(0, slow - 1); }
     if (slow > 45 && !downshifted){ downshifted = true; scale = 0.5; }
@@ -59,6 +91,7 @@ export function initOcean(){
     state.scroll += (sTarget - state.scroll) * 0.08;
     state.shallow += (shallowTarget - state.shallow) * 0.04;
 
+    updateCSSColors(state.dayTime);
     render();
     if (running) requestAnimationFrame(frame);
   }
@@ -67,6 +100,7 @@ export function initOcean(){
     state.scroll = Math.min(window.scrollY / Math.max(window.innerHeight, 1), 1.5);
   }
 
+  updateCSSColors(state.dayTime);
   render();
   window.addEventListener('resize', () => { if (!running) render(); });
   window.addEventListener('scroll', () => { if (!running){ syncScroll(); render(); } }, { passive: true });
@@ -93,6 +127,23 @@ export function initOcean(){
   const ctrlChop = document.getElementById('ctrl-chop');
   const ctrlShallow = document.getElementById('ctrl-shallow');
   const ctrlPlay = document.getElementById('ctrl-play');
+
+  if (ctrlTime) {
+    ctrlTime.value = state.dayTime * 100;
+    ctrlTime.addEventListener('input', (e) => {
+      state.dayTime = parseFloat(e.target.value) / 100;
+      manualTimeOverride = true;
+      clearTimeout(overrideTimeout);
+      
+      // Auto-resume cycle 5 seconds after they finish dragging
+      overrideTimeout = setTimeout(() => { manualTimeOverride = false; }, 5000);
+      
+      if (!running || paused) {
+        updateCSSColors(state.dayTime);
+        render();
+      }
+    });
+  }
 
   if (ctrlChop){
     ctrlChop.addEventListener('input', (e) => {

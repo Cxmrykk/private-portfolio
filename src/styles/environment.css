@@ -1,3 +1,10 @@
+/* ---------- CSS Fallbacks and Atmosphere Variables ---------- */
+:root {
+  --sky-zenith: #1966cc;
+  --sky-horizon: #c2ebff;
+  --light-blend: 1;
+}
+
 /* ---------- the ocean ---------- */
 #sea{
   position:fixed; inset:0;
@@ -26,13 +33,12 @@
 .no-webgl #sea, .no-webgl #ui-blur-layer, .no-webgl #ui-glass{display:none}
 body.no-webgl{
   background:
-    radial-gradient(120% 70% at 70% 8%, rgba(255,255,255,.9), rgba(255,255,255,0) 55%),
-    linear-gradient(180deg,#1b6fc4 0%, #49b4e8 38%, #7fd6f2 52%, #0c5f96 53%, #063a60 100%) fixed;
-  transition:background .9s ease;
+    radial-gradient(120% 70% at 70% 8%, rgba(255,255,255,calc(0.9 * var(--light-blend))), rgba(255,255,255,0) 55%),
+    linear-gradient(180deg, var(--sky-zenith) 0%, var(--sky-horizon) 38%, #0c5f96 53%, #063a60 100%) fixed;
 }
 body.no-webgl.is-underwater{
   background:
-    radial-gradient(70% 40% at 52% -6%, rgba(200,245,255,.55), rgba(120,210,240,0) 62%),
+    radial-gradient(70% 40% at 52% -6%, rgba(200,245,255,calc(0.55 * var(--light-blend))), rgba(120,210,240,0) 62%),
     linear-gradient(180deg,#0b6ea8 0%, #075982 30%, #04405f 62%, #02293d 100%) fixed;
 }
 
@@ -41,19 +47,16 @@ body.no-webgl.is-underwater{
   position:fixed; inset:0; z-index:-2; pointer-events:none;
   transition:opacity .9s ease;
   background:
-    radial-gradient(90% 46% at 50% 0%, rgba(255,255,255,.34), rgba(255,255,255,0) 62%),
-    radial-gradient(60% 30% at 78% 12%, rgba(255,235,180,.30), rgba(255,235,180,0) 70%);
+    radial-gradient(90% 46% at 50% 0%, rgba(255,255,255,calc(0.34 * var(--light-blend))), rgba(255,255,255,0) 62%),
+    radial-gradient(60% 30% at 78% 12%, rgba(255,235,180,calc(0.30 * var(--light-blend))), rgba(255,235,180,0) 70%);
 }
 body.is-underwater .atmosphere{opacity:0}
-
-/* Underwater caustics and bubbles are rendered in the ocean pass
-   (see ocean.glsl.js) so they stay behind the glass. */
 
 /* ---------- surface-break veil ---------- */
 .splash{
   position:fixed; inset:0; z-index:12; pointer-events:none; opacity:0;
   background:
-    radial-gradient(120% 95% at 50% 38%, rgba(255,255,255,.88), rgba(205,244,255,.62) 40%, rgba(130,210,242,.38) 70%, rgba(70,170,220,.18) 100%);
+    radial-gradient(120% 95% at 50% 38%, rgba(255,255,255,calc(0.88 * var(--light-blend))), rgba(205,244,255,calc(0.62 * var(--light-blend))) 40%, rgba(130,210,242,calc(0.38 * var(--light-blend))) 70%, rgba(70,170,220,calc(0.18 * var(--light-blend))) 100%);
 }
 
 @media (prefers-reduced-motion:reduce){

@@ -12,9 +12,9 @@ export const MAX_GLASS = 60;
 /* CSS px of ocean rendered around each UI panel (covers shadow + refraction reach) */
 const SCISSOR_MARGIN = 28;
 
-const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow', 'uDive'];
+const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow', 'uDive', 'uDayTime'];
 const GLASS_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uCursor', 'uPx', 'uScroll', 'uDive',
-                        'uLayerRender', 'uOcean', 'uGlassCount', 'uGlassRects', 'uGlassParams'];
+                        'uLayerRender', 'uOcean', 'uGlassCount', 'uGlassRects', 'uGlassParams', 'uDayTime'];
 
 function compile(gl, type, src){
   const sh = gl.createShader(type);
@@ -93,7 +93,6 @@ export function createRenderer(canvasId, { isUI }){
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  /* pack visible panels into the uniform arrays; returns the count */
   function pack(items, h, sx, sy){
     let count = 0;
     scissors.length = 0;
@@ -131,7 +130,7 @@ export function createRenderer(canvasId, { isUI }){
     return count;
   }
 
-  /* state: { clock, mouseX, mouseY, cursorX, cursorY, cursorOn, scroll, chop, shallow, dive } */
+  /* state: { clock, dayTime, mouseX, mouseY, cursorX, cursorY, cursorOn, scroll, chop, shallow, dive } */
   function draw(state, items, dpr){
     const w = Math.max(1, Math.round(window.innerWidth * dpr));
     const h = Math.max(1, Math.round(window.innerHeight * dpr));
@@ -145,6 +144,7 @@ export function createRenderer(canvasId, { isUI }){
     gl.useProgram(ocean.prog);
     gl.uniform2f(ocean.u.uRes, w, h);
     gl.uniform1f(ocean.u.uTime, state.clock);
+    gl.uniform1f(ocean.u.uDayTime, state.dayTime);
     gl.uniform2f(ocean.u.uMouse, state.mouseX, state.mouseY);
     gl.uniform1f(ocean.u.uScroll, state.scroll);
     gl.uniform1f(ocean.u.uChop, state.chop);
@@ -177,6 +177,7 @@ export function createRenderer(canvasId, { isUI }){
     }
     gl.uniform2f(glass.u.uRes, w, h);
     gl.uniform1f(glass.u.uTime, state.clock);
+    gl.uniform1f(glass.u.uDayTime, state.dayTime);
     gl.uniform2f(glass.u.uMouse, state.mouseX, state.mouseY);
     gl.uniform3f(glass.u.uCursor, state.cursorX * sx, h - state.cursorY * sy, state.cursorOn);
     gl.uniform1f(glass.u.uPx, sx);

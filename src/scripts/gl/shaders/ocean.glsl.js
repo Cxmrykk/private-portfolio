@@ -93,6 +93,8 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
   refl.y = max(refl.y, 0.015);
   vec3 skyCol = sky(refl);
 
+  float lightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
+
   float f0 = 0.02;
   float fres = f0 + (1.0 - f0) * pow(clamp(1.0 - dot(-rd, n), 0.0, 1.0), 5.0);
   float crest = clamp(p.y * 0.95 + 0.45, 0.0, 1.0);
@@ -100,8 +102,8 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
   vec3 deepD    = vec3(0.005, 0.080, 0.180);
   vec3 shallowD = vec3(0.030, 0.350, 0.480);
   vec3 bodyDeep = mix(deepD, shallowD, crest);
-  float sss = pow(clamp(dot(n, SUN) * 0.5 + 0.5, 0.0, 1.0), 3.0) * crest;
-  bodyDeep += vec3(0.12, 0.45, 0.35) * sss * 0.8;
+  float sss = pow(clamp(dot(n, getPrimaryLight()) * 0.5 + 0.5, 0.0, 1.0), 3.0) * crest;
+  bodyDeep += vec3(0.12, 0.45, 0.35) * sss * 0.8 * lightI;
 
   vec3 rdRefr = refract(rd, n, 1.0 / 1.333);
   float floorY = -1.6;
@@ -111,17 +113,20 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
   float caustics = getCaustics(pFloor.xz);
   float sandRipples = sin(pFloor.x * 6.0 + sin(pFloor.z * 4.0)) * 0.05 + 0.95;
   vec3 sand = vec3(0.85, 0.80, 0.65) * sandRipples;
-  vec3 floorC = sand + vec3(1.0, 0.95, 0.8) * caustics * 2.0;
+  vec3 floorC = sand + vec3(1.0, 0.95, 0.8) * caustics * 2.0 * lightI;
 
   float depthWalk = max(tFloor, 0.0);
   vec3 extinction = exp(-vec3(0.8, 0.25, 0.05) * depthWalk);
-  vec3 scatter = vec3(0.0, 0.4, 0.5) * (1.0 - extinction) * 0.3;
+  
+  // Ambient darkening during nighttime
+  bodyDeep *= lightI;
+  vec3 scatter = vec3(0.0, 0.4, 0.5) * (1.0 - extinction) * 0.3 * lightI;
   vec3 bodyShallow = floorC * extinction + scatter;
 
   vec3 body = mix(bodyDeep, bodyShallow, uShallow);
 
-  vec3 hv = normalize(SUN - rd);
-  float specMain = pow(clamp(dot(n, hv), 0.0, 1.0), 400.0) * 3.0;
+  vec3 hv = normalize(getPrimaryLight() - rd);
+  float specMain = pow(clamp(dot(n, hv), 0.0, 1.0), 400.0) * 3.0 * lightI;
 
   float microFade = smoothstep(60.0, 15.0, dist);
   float spec = specMain;
@@ -131,7 +136,7 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
     vec2 microUV = p.xz * 12.0 - uTime * 0.3;
     float micro = vnoise(rot * microUV) * 0.5 + 0.5;
     vec3 nGlint = normalize(n + vec3(micro * 0.15, 0.0, micro * 0.15) * microFade);
-    float specGlint = pow(clamp(dot(nGlint, hv), 0.0, 1.0), 1200.0) * (3.0 * microFade);
+    float specGlint = pow(clamp(dot(nGlint, hv), 0.0, 1.0), 1200.0) * (3.0 * microFade) * lightI;
     spec += specGlint;
   }
 
@@ -141,8 +146,8 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
   float foam = smoothstep(0.15, 0.35, steep) * smoothstep(0.20, 0.85, crest) * (foamNoise * 0.8 + 0.2);
 
   vec3 col = mix(body, skyCol, fres);
-  col += vec3(1.0, 0.95, 0.85) * spec;
-  col = mix(col, vec3(0.9, 0.95, 1.0), foam * 0.5 * uChop);
+  col += getPrimaryLightCol() * spec;
+  col = mix(col, vec3(0.9, 0.95, 1.0), foam * 0.5 * uChop * lightI);
 
   float fog = 1.0 - exp(-dist * 0.0035);
   col = mix(col, sky(vec3(rd.x, 0.004, rd.z)), fog);
@@ -154,6 +159,7 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
 float seabedDepth(){ return mix(-27.0, -12.0, uShallow); }
 
 vec3 seabedColor(vec3 p){
+  float lightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
   vec2 q = p.xz;
   float grain  = fbm(q * 0.55);
   float ripple = sin(q.x * 1.7 + sin(q.y * 1.2) * 1.8) * 0.5 + 0.5;
@@ -163,13 +169,15 @@ vec3 seabedColor(vec3 p){
   sand = mix(sand, vec3(0.10, 0.24, 0.16), weed * 0.70);
   float rocks = smoothstep(0.74, 0.90, fbm(q * 0.95 + 21.0));
   sand = mix(sand, vec3(0.30, 0.32, 0.31), rocks * 0.55);
-  vec3 s = p + SHAFT * ((0.0 - p.y) / SHAFT.y);
+  vec3 s = p + getShaftDir() * ((0.0 - p.y) / getShaftDir().y);
   float c = getCaustics(s.xz * 0.38);
-  sand += vec3(1.0, 0.95, 0.80) * c * 1.15 * exp(p.y * 0.035);
+  sand += vec3(1.0, 0.95, 0.80) * c * 1.15 * exp(p.y * 0.035) * lightI;
+  sand *= mix(0.3, 1.0, lightI);
   return sand;
 }
 
 vec3 renderUnder(vec3 ro, vec3 rd){
+  float lightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
   float bedY = seabedDepth();
   vec3 col; float t;
   if (rd.y > 0.035){
@@ -182,27 +190,28 @@ vec3 renderUnder(vec3 ro, vec3 rd){
     if (dot(refr, refr) > 1e-4){
       col = sky(normalize(refr)) * 1.06;
       float rim = 1.0 - clamp(dot(-rd, nd), 0.0, 1.0);
-      col += vec3(0.50, 0.86, 0.96) * pow(rim, 6.0) * 0.55;
+      col += vec3(0.50, 0.86, 0.96) * pow(rim, 6.0) * 0.55 * lightI;
     } else {
       vec3 rr = reflect(rd, nd);
       float down = clamp(-rr.y, 0.0, 1.0);
       col = mix(vec3(0.03, 0.16, 0.24), vec3(0.16, 0.30, 0.28), down);
-      col += vec3(0.20, 0.45, 0.48) * getCaustics(p.xz * 0.45) * 0.35;
+      col += vec3(0.20, 0.45, 0.48) * getCaustics(p.xz * 0.45) * 0.35 * lightI;
     }
-    col += vec3(0.30, 0.60, 0.62) * getCaustics(p.xz * 0.55) * 0.30;
+    col += vec3(0.30, 0.60, 0.62) * getCaustics(p.xz * 0.55) * 0.30 * lightI;
   } else if (rd.y < -0.035){
     float tb = (bedY - ro.y) / rd.y;
     t = min(tb, 240.0);
-    col = (tb < 240.0) ? seabedColor(ro + rd * t) : vec3(0.02, 0.09, 0.14);
+    col = (tb < 240.0) ? seabedColor(ro + rd * t) : vec3(0.02, 0.09, 0.14) * mix(0.2, 1.0, lightI);
   } else {
     t = 200.0;
-    col = vec3(0.02, 0.09, 0.14);
+    col = vec3(0.02, 0.09, 0.14) * mix(0.2, 1.0, lightI);
   }
   float td = min(t, 150.0);
   vec3 absorbC = vec3(0.155, 0.045, 0.028);
   vec3 ext = exp(-absorbC * td);
   float midY = ro.y + rd.y * td * 0.5;
   vec3 amb = vec3(0.045, 0.30, 0.42) * exp(clamp(midY, -70.0, 0.0) * 0.045);
+  amb *= mix(0.2, 1.0, lightI);
   col = col * ext + amb * (1.0 - ext);
   float shaft = 0.0;
   float dith  = hash21(gl_FragCoord.xy * 0.37 + fract(uTime) * 91.0);
@@ -210,19 +219,16 @@ vec3 renderUnder(vec3 ro, vec3 rd){
   for (int i = 0; i < 10; i++){
     vec3 sp = ro + rd * (segLen * (float(i) + dith));
     if (sp.y > -0.15) continue;
-    vec3 q = sp + SHAFT * ((0.0 - sp.y) / SHAFT.y);
+    vec3 q = sp + getShaftDir() * ((0.0 - sp.y) / getShaftDir().y);
     shaft += getCaustics(q.xz * 0.22) * exp(sp.y * 0.05);
   }
   shaft /= 10.0;
-  float toSun = clamp(dot(rd, SHAFT), 0.0, 1.0);
-  col += vec3(0.42, 0.86, 0.98) * shaft * (0.55 + 1.35 * pow(toSun, 2.2)) * 1.25;
+  float toSun = clamp(dot(rd, getShaftDir()), 0.0, 1.0);
+  col += vec3(0.42, 0.86, 0.98) * shaft * (0.55 + 1.35 * pow(toSun, 2.2)) * 1.25 * lightI;
   return col;
 }
 
-/* ---------- bubbles ----------
-   Screen-space, in display colour, drawn after tone mapping.
-   Each bubble is a thin lens: a soft ring, a faint fill, and one
-   highlight; larger bubbles rise faster. */
+/* ---------- bubbles ---------- */
 vec3 addBubbles(vec3 col, vec2 fc, float amount){
   if (amount <= 0.001) return col;
   float aspect = uRes.x / uRes.y;
@@ -300,7 +306,6 @@ void main(){
   col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, mix(1.12, 1.04, sub));
   col *= 1.0 - 0.45 * sub * smoothstep(0.55, 1.85, length(uv));
 
-  /* bubbles live in the water, so they go into the texture the glass samples */
   col = addBubbles(col, gl_FragCoord.xy, smoothstep(0.10, 0.32, d));
 
   fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
