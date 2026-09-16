@@ -509,11 +509,11 @@ export function initOcean() {
                 glassCol += spec;
                 finalCol = mix(finalCol, glassCol, glassMask);
             } else {
-                float a = currentAlpha * glassMask;
-                // Accumulate color via source-over pre-multiplied logic, handling additive speculars seamlessly
-                vec3 c = glassCol * a + vec3(1.0) * spec * glassMask;
-                pmColor = c + pmColor * (1.0 - a);
-                pmAlpha = a + pmAlpha * (1.0 - a);
+                // Correct Bottom-to-Top Pre-Multiplied Alpha Blending
+                float srcA = currentAlpha * glassMask;
+                vec3 srcC = glassCol * srcA + vec3(1.0) * spec * glassMask; 
+                pmColor = srcC + pmColor * (1.0 - srcA);
+                pmAlpha = srcA + pmAlpha * (1.0 - srcA);
             }
         }
     }
@@ -602,7 +602,6 @@ export function initOcean() {
         const { el, style, op } = elsArray[i];
         const rect = el.getBoundingClientRect();
         
-        // Viewport culling
         if (rect.bottom < -150 || rect.top > window.innerHeight + 150) continue;
         
         let idx = count * 4;
@@ -617,13 +616,13 @@ export function initOcean() {
         }
         glassParamsData[idx] = br * scaleX;
         
-        let type = 0.0; // Panel Glass
+        let type = 0.0; 
         if (el.classList.contains('btn')) {
             type = el.classList.contains('ghost') ? 2.0 : 1.0;
         } else if (el.classList.contains('result')) {
-            type = 3.0; // Green Gel
+            type = 3.0; 
         } else if (el.tagName.toLowerCase() === 'b') {
-            type = 4.0; // Chip Gel
+            type = 4.0; 
         }
         glassParamsData[idx+1] = type;
         glassParamsData[idx+2] = el.matches(':hover') ? 1.0 : 0.0;
@@ -694,6 +693,36 @@ export function initOcean() {
     baseEls.sort((a, b) => a.z - b.z);
     uiEls.sort((a, b) => a.z - b.z);
 
+    // Synchronize underlying DOM CSS blur layer dynamically to obscure text sliding below UI
+    const blurLayer = document.getElementById('ui-blur-layer');
+    if (blurLayer) {
+      while (blurLayer.children.length < uiEls.length) {
+        const box = document.createElement('div');
+        box.style.position = 'absolute';
+        box.style.backdropFilter = 'blur(12px)';
+        box.style.webkitBackdropFilter = 'blur(12px)';
+        blurLayer.appendChild(box);
+      }
+      for (let i = 0; i < blurLayer.children.length; i++) {
+        if (i < uiEls.length) {
+          const { el, style } = uiEls[i];
+          const rect = el.getBoundingClientRect();
+          const box = blurLayer.children[i];
+          box.style.display = 'block';
+          // Fix: Retain exact subpixel boundaries natively delivered by getBoundingClientRect.
+          // This prevents the DOM blur layer boxes from misaligning/peeking out from underneath 
+          // the WebGL rendering logic coordinate space which is natively utilizing these raw floats.
+          box.style.left = rect.left + 'px';
+          box.style.top = rect.top + 'px';
+          box.style.width = rect.width + 'px';
+          box.style.height = rect.height + 'px';
+          box.style.borderRadius = style.borderRadius;
+        } else {
+          blurLayer.children[i].style.display = 'none';
+        }
+      }
+    }
+
     currentMousePx.x += (clientMouse.x - currentMousePx.x) * 0.1;
     currentMousePx.y += (clientMouse.y - currentMousePx.y) * 0.1;
 
@@ -734,6 +763,8 @@ export function initOcean() {
 
   updateGlassAndDraw();
   window.addEventListener('resize', () => { if (!running) updateGlassAndDraw(); });
+
+  window.addEventListener('scroll', () => { if (!running) updateGlassAndDraw(); }, { passive: true });
 
   window.addEventListener('pointermove', (e) => {
     clientMouse.x = e.clientX;

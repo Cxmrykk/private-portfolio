@@ -21,16 +21,6 @@ body.is-underwater .glass{
 }
 .glass > *{position:relative}
 
-/* ---------- Override for High-Z UI Elements ---------- */
-/* Natively blur the text that scrolls underneath the UI layers, 
-   while the WebGL canvas sits on top of this and applies the glossy specular light */
-header .bar-inner,
-.sea-controls .sea-panel,
-.sea-controls .sea-status {
-  -webkit-backdrop-filter: blur(12px) !important;
-  backdrop-filter: blur(12px) !important;
-}
-
 /* ---------- gel buttons ---------- */
 .btn{
   display:inline-flex; align-items:center; justify-content:center; cursor:pointer;
