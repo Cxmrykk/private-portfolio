@@ -39,20 +39,25 @@ export function initOcean(){
 
   function updateCSSColors(dayTime) {
     const sunY = Math.sin((dayTime - 6.0) / 24.0 * Math.PI * 2) * 0.8;
-    const dayW = Math.max(0, Math.min(1, (sunY - (-0.1)) / 0.3));
-    const sunsetW = Math.max(0, Math.min(1, (sunY - (-0.2)) / 0.3)) * (1.0 - Math.max(0, Math.min(1, (sunY - 0.1) / 0.3)));
-    const nightW = 1.0 - Math.max(0, Math.min(1, (sunY - (-0.2)) / 0.2));
+    
+    // Sync to shader's widened twilight zone
+    const dayW = Math.max(0, Math.min(1, (sunY - 0.15) / (0.6 - 0.15)));
+    const nightW = 1.0 - Math.max(0, Math.min(1, (sunY - (-0.3)) / (0.0 - (-0.3))));
+    const sunsetW = Math.max(0, 1.0 - (dayW + nightW));
 
     const lerp = (c1, c2, c3, w1, w2, w3) => c1.map((v, i) => Math.round(v * w1 + c2[i] * w2 + c3[i] * w3));
     
-    const dayZ = [25, 102, 204]; const dayH = [194, 234, 252];
-    const setZ = [38, 64, 153];  const setH = [255, 115, 38];
-    const nigZ = [3, 5, 13];     const nigH = [13, 25, 38];
+    // 3-stop palettes mapped identically to common.glsl.js
+    const dayZ = [15, 82, 186];  const dayM = [97, 173, 240];  const dayH = [209, 240, 255];
+    const setZ = [20, 56, 97];   const setM = [166, 77, 89];   const setH = [255, 102, 26]; // Deep teal zenith, rosy mid, fiery horizon
+    const nigZ = [3, 5, 13];     const nigM = [5, 13, 25];     const nigH = [13, 31, 51];
 
     const z = lerp(dayZ, setZ, nigZ, dayW, sunsetW, nightW);
+    const m = lerp(dayM, setM, nigM, dayW, sunsetW, nightW);
     const h = lerp(dayH, setH, nigH, dayW, sunsetW, nightW);
 
     document.documentElement.style.setProperty('--sky-zenith', `rgb(${z[0]},${z[1]},${z[2]})`);
+    document.documentElement.style.setProperty('--sky-mid', `rgb(${m[0]},${m[1]},${m[2]})`);
     document.documentElement.style.setProperty('--sky-horizon', `rgb(${h[0]},${h[1]},${h[2]})`);
     document.documentElement.style.setProperty('--light-blend', (dayW + sunsetW).toFixed(3));
   }

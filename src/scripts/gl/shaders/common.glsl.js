@@ -36,15 +36,21 @@ vec3 getShaftDir(){
   return normalize(vec3(primary.x, max(primary.y, 0.05), primary.z));
 }
 
-vec3 getPrimaryLightCol(){
+/* Drags out the sunset and sunrise significantly */
+void getPhaseWeights(out float dayW, out float sunsetW, out float nightW){
   float sunY = getSunDir().y;
-  vec3 dayCol = vec3(1.00, 0.97, 0.90);
-  vec3 sunsetCol = vec3(1.00, 0.60, 0.30);
-  vec3 nightCol = vec3(0.60, 0.80, 1.00);
+  dayW = smoothstep(0.15, 0.60, sunY);
+  nightW = 1.0 - smoothstep(-0.30, 0.0, sunY);
+  sunsetW = max(0.0, 1.0 - (dayW + nightW));
+}
 
-  float dayW = smoothstep(-0.1, 0.2, sunY);
-  float sunsetW = smoothstep(-0.2, 0.1, sunY) * (1.0 - smoothstep(0.1, 0.4, sunY));
-  float nightW = 1.0 - smoothstep(-0.2, 0.0, sunY);
+vec3 getPrimaryLightCol(){
+  float dayW, sunsetW, nightW;
+  getPhaseWeights(dayW, sunsetW, nightW);
+
+  vec3 dayCol = vec3(1.00, 0.97, 0.90);
+  vec3 sunsetCol = vec3(1.00, 0.45, 0.15); // Fiery orange highlights
+  vec3 nightCol = vec3(0.50, 0.70, 1.00);
 
   return dayCol * dayW + sunsetCol * sunsetW + nightCol * nightW;
 }
@@ -79,33 +85,44 @@ vec3 sky(vec3 rd){
   vec3 sunDir = getSunDir();
   vec3 moonDir = getMoonDir();
 
-  // Dynamic palettes
-  vec3 dayZenith = vec3(0.10, 0.40, 0.80);
-  vec3 dayHorizon = vec3(0.76, 0.92, 0.99);
+  float dayW, sunsetW, nightW;
+  getPhaseWeights(dayW, sunsetW, nightW);
 
-  vec3 sunsetZenith = vec3(0.15, 0.25, 0.60);
-  vec3 sunsetHorizon = vec3(1.00, 0.45, 0.15);
+  // 3-Stop Dynamic Palettes (Horizon, Mid-Sky, Zenith)
+  vec3 dayZ = vec3(0.06, 0.32, 0.73);
+  vec3 dayM = vec3(0.38, 0.68, 0.94);
+  vec3 dayH = vec3(0.82, 0.94, 1.00);
 
-  vec3 nightZenith = vec3(0.01, 0.02, 0.05);
-  vec3 nightHorizon = vec3(0.05, 0.10, 0.15);
+  vec3 setZ = vec3(0.08, 0.22, 0.38); // Deep teal/blue zenith
+  vec3 setM = vec3(0.65, 0.30, 0.35); // Dusty rose/magenta transition
+  vec3 setH = vec3(1.00, 0.40, 0.10); // Fiery orange horizon
 
-  // Time weightings
-  float sunY = sunDir.y;
-  float dayW = smoothstep(-0.1, 0.2, sunY);
-  float sunsetW = smoothstep(-0.2, 0.1, sunY) * (1.0 - smoothstep(0.1, 0.4, sunY));
-  float nightW = 1.0 - smoothstep(-0.2, 0.0, sunY);
+  vec3 nigZ = vec3(0.01, 0.02, 0.05);
+  vec3 nigM = vec3(0.02, 0.05, 0.10);
+  vec3 nigH = vec3(0.05, 0.12, 0.20);
 
-  vec3 zenith = dayZenith * dayW + sunsetZenith * sunsetW + nightZenith * nightW;
-  vec3 horizon = dayHorizon * dayW + sunsetHorizon * sunsetW + nightHorizon * nightW;
+  vec3 zenith = dayZ * dayW + setZ * sunsetW + nigZ * nightW;
+  vec3 mid    = dayM * dayW + setM * sunsetW + nigM * nightW;
+  vec3 horizon= dayH * dayW + setH * sunsetW + nigH * nightW;
 
-  vec3 col = mix(horizon, zenith, pow(clamp(y, 0.0, 1.0), 0.60));
+  // Blend based on view height
+  float hF = clamp(rd.y, 0.0, 1.0);
+  vec3 col = mix(horizon, mid, smoothstep(0.0, 0.35, hF));
+  col = mix(col, zenith, smoothstep(0.15, 1.0, hF));
 
-  // Sun rendering
+  // Sun rendering - Traditional core
   float sd = max(dot(rd, sunDir), 0.0);
   vec3 sunHalo = vec3(1.00, 0.88, 0.66) * pow(sd, 1200.0) * 14.0 * dayW;
-  sunHalo += vec3(1.00, 0.60, 0.20) * pow(sd, 200.0) * 2.0 * sunsetW;
-  sunHalo += vec3(1.00, 0.80, 0.52) * pow(sd, 22.0)   * 0.38 * (dayW + sunsetW);
-  sunHalo += vec3(0.95, 0.80, 0.60) * pow(sd, 3.0)    * 0.06 * (dayW + sunsetW);
+  sunHalo += vec3(1.00, 0.80, 0.52) * pow(sd, 22.0) * 0.38 * (dayW + sunsetW);
+  sunHalo += vec3(0.95, 0.80, 0.60) * pow(sd, 3.0)  * 0.06 * (dayW + sunsetW);
+
+  // Sun rendering - Sunset atmospheric horizontal stretching / bleeding
+  vec3 squashRd = normalize(vec3(rd.x, rd.y * 3.5, rd.z));
+  vec3 squashSun = normalize(vec3(sunDir.x, sunDir.y * 3.5, sunDir.z));
+  float sdStretch = max(dot(squashRd, squashSun), 0.0);
+  
+  sunHalo += vec3(1.00, 0.35, 0.10) * pow(sdStretch, 120.0) * 8.0 * sunsetW; // Wide red/orange burn
+  sunHalo += vec3(1.00, 0.80, 0.40) * pow(sdStretch, 350.0) * 3.0 * sunsetW; // Wide bright core
   col += sunHalo;
 
   // Moon rendering
@@ -121,7 +138,7 @@ vec3 sky(vec3 rd){
     col += vec3(1.0) * starMask * nightW * smoothstep(0.0, 0.1, rd.y) * (1.0 - pow(md, 2.0));
   }
 
-  // Volumetric Clouds
+  // Volumetric Clouds catching fire
   if (rd.y > 0.004){
     vec2 cp = rd.xz / max(rd.y, 0.055);
     float drift = uTime * 0.0055;
@@ -130,7 +147,8 @@ vec3 sky(vec3 rd){
     float band = smoothstep(0.0, 0.26, rd.y);
     
     vec3 cloudDay = mix(vec3(0.74, 0.83, 0.93), vec3(1.0), smoothstep(0.2, 1.0, f));
-    vec3 cloudSunset = mix(vec3(0.4, 0.2, 0.3), vec3(1.0, 0.6, 0.4), smoothstep(0.2, 1.0, f));
+    // Sunset clouds: dark bellies, fiery gold tops
+    vec3 cloudSunset = mix(vec3(0.3, 0.15, 0.2), vec3(1.0, 0.6, 0.2), smoothstep(0.1, 0.9, f));
     vec3 cloudNight = mix(vec3(0.05, 0.08, 0.12), vec3(0.15, 0.2, 0.3), smoothstep(0.2, 1.0, f));
 
     vec3 cloud = cloudDay * dayW + cloudSunset * sunsetW + cloudNight * nightW;

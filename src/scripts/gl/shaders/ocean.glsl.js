@@ -91,19 +91,38 @@ float traceUnderside(vec3 ro, vec3 rd){
 vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
   vec3 refl = reflect(rd, n);
   refl.y = max(refl.y, 0.015);
-  vec3 skyCol = sky(refl);
+  vec3 skyCol = sky(refl); // The sky reflection handles the broad orange/magenta horizon surface color
 
+  float dayW, sunsetW, nightW;
+  getPhaseWeights(dayW, sunsetW, nightW);
   float lightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
 
   float f0 = 0.02;
   float fres = f0 + (1.0 - f0) * pow(clamp(1.0 - dot(-rd, n), 0.0, 1.0), 5.0);
   float crest = clamp(p.y * 0.95 + 0.45, 0.0, 1.0);
 
-  vec3 deepD    = vec3(0.005, 0.080, 0.180);
-  vec3 shallowD = vec3(0.030, 0.350, 0.480);
+  // Dynamic deep water palettes - Kept physically grounded (Teal -> Dark Blue -> Black)
+  vec3 deepD_day = vec3(0.005, 0.080, 0.180);
+  vec3 deepD_set = vec3(0.003, 0.040, 0.100); 
+  vec3 deepD_nig = vec3(0.002, 0.005, 0.015);
+  vec3 deepD = deepD_day * dayW + deepD_set * sunsetW + deepD_nig * nightW;
+
+  // Dynamic shallow water palettes
+  vec3 shallowD_day = vec3(0.030, 0.350, 0.480);
+  vec3 shallowD_set = vec3(0.015, 0.150, 0.250); 
+  vec3 shallowD_nig = vec3(0.010, 0.040, 0.080);
+  vec3 shallowD = shallowD_day * dayW + shallowD_set * sunsetW + shallowD_nig * nightW;
+
   vec3 bodyDeep = mix(deepD, shallowD, crest);
+  
+  // Dramatic fiery subsurface scattering (SSS) glowing *through* the wave crests
+  vec3 sss_day = vec3(0.12, 0.45, 0.35);
+  vec3 sss_set = vec3(1.00, 0.45, 0.10) * 2.5; 
+  vec3 sss_nig = vec3(0.02, 0.10, 0.15);
+  vec3 sssCol = sss_day * dayW + sss_set * sunsetW + sss_nig * nightW;
+
   float sss = pow(clamp(dot(n, getPrimaryLight()) * 0.5 + 0.5, 0.0, 1.0), 3.0) * crest;
-  bodyDeep += vec3(0.12, 0.45, 0.35) * sss * 0.8 * lightI;
+  bodyDeep += sssCol * sss * lightI;
 
   vec3 rdRefr = refract(rd, n, 1.0 / 1.333);
   float floorY = -1.6;
@@ -118,15 +137,15 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
   float depthWalk = max(tFloor, 0.0);
   vec3 extinction = exp(-vec3(0.8, 0.25, 0.05) * depthWalk);
   
-  // Ambient darkening during nighttime
   bodyDeep *= lightI;
   vec3 scatter = vec3(0.0, 0.4, 0.5) * (1.0 - extinction) * 0.3 * lightI;
   vec3 bodyShallow = floorC * extinction + scatter;
 
   vec3 body = mix(bodyDeep, bodyShallow, uShallow);
 
+  // Intense specular highlight to carry the golden hour light path
   vec3 hv = normalize(getPrimaryLight() - rd);
-  float specMain = pow(clamp(dot(n, hv), 0.0, 1.0), 400.0) * 3.0 * lightI;
+  float specMain = pow(clamp(dot(n, hv), 0.0, 1.0), 350.0) * 3.5 * lightI;
 
   float microFade = smoothstep(60.0, 15.0, dist);
   float spec = specMain;
@@ -136,7 +155,7 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
     vec2 microUV = p.xz * 12.0 - uTime * 0.3;
     float micro = vnoise(rot * microUV) * 0.5 + 0.5;
     vec3 nGlint = normalize(n + vec3(micro * 0.15, 0.0, micro * 0.15) * microFade);
-    float specGlint = pow(clamp(dot(nGlint, hv), 0.0, 1.0), 1200.0) * (3.0 * microFade) * lightI;
+    float specGlint = pow(clamp(dot(nGlint, hv), 0.0, 1.0), 1000.0) * (3.0 * microFade) * lightI;
     spec += specGlint;
   }
 
