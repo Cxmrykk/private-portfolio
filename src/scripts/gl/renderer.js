@@ -98,7 +98,7 @@ export function createRenderer(canvasId, { isUI }){
     scissors.length = 0;
     for (const it of items){
       if (count >= MAX_GLASS) break;
-      const { el, style, rect, op, hover } = it;
+      const { el, style, rect, op } = it;
       if (rect.bottom < -150 || rect.top > window.innerHeight + 150) continue;
 
       const i = count * 4;
@@ -113,7 +113,7 @@ export function createRenderer(canvasId, { isUI }){
       }
       paramsData[i]     = br * sx;
       paramsData[i + 1] = glassType(el);
-      paramsData[i + 2] = hover ? 1 : 0;
+      paramsData[i + 2] = 0; // padding, previously hover
       paramsData[i + 3] = op;
 
       if (isUI){

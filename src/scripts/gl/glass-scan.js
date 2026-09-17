@@ -23,7 +23,7 @@ export function scanGlass(){
     let z = parseInt(style.zIndex, 10);
     if (isNaN(z)) z = (el.closest('header') || el.closest('.sea-controls')) ? 100 : 1;
 
-    const item = { el, style, rect, z, op, hover: el.matches(':hover') };
+    const item = { el, style, rect, z, op };
     (z >= 20 ? ui : base).push(item);
   });
 

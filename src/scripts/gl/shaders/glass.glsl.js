@@ -25,7 +25,7 @@ uniform sampler2D uOcean;
 #define IOR 1.52            // crown glass
 uniform int  uGlassCount;
 uniform vec4 uGlassRects[MAX_GLASS];  // x, y, w, h  (canvas px, y up)
-uniform vec4 uGlassParams[MAX_GLASS]; // radius, type, hover, opacity
+uniform vec4 uGlassParams[MAX_GLASS]; // radius, type, padding, opacity
 
 out vec4 fragColor;
 
@@ -66,9 +66,7 @@ vec3 envReflect(vec3 R, float dive){
   return mix(above, below, dive);
 }
 
-void material(float type, vec2 lu, float hover, float dive,
-              out vec3 tint, out float tintW, out float frostLod, out float shadowW,
-              out float gel, out float bevK, out float thick){
+void material(float type, vec2 lu, out vec3 tint, out float tintW, out float frostLod, out float shadowW, out float gel, out float bevK, out float thick){
   gel = 0.0;
   tint = vec3(1.0);
   if (type < 0.5){
@@ -81,7 +79,6 @@ void material(float type, vec2 lu, float hover, float dive,
     vec3 c1 = vec3(0.56, 0.86, 1.00), c2 = vec3(0.18, 0.65, 0.91);
     vec3 c3 = vec3(0.05, 0.46, 0.75), c4 = vec3(0.04, 0.37, 0.63);
     tint = lu.y > 0.52 ? mix(c2, c1, (lu.y - 0.52) / 0.48) : mix(c4, c3, lu.y / 0.52);
-    if (hover > 0.5) tint = mix(tint, vec3(1.0), 0.12);
     tintW = 0.80;
     frostLod = 0.6;
     shadowW = 0.26;
@@ -141,7 +138,7 @@ void main(){
   float sunNear = exp(-length(sunPx - fc) / (1100.0 * uPx));
   float oShare = (uLayerRender == 0) ? 1.0 : 0.45;
 
-  /* cursor glow */
+  /* global cursor glow */
   float curD = length(uCursor.xy - fc);
   float curW = exp(-curD / (320.0 * uPx)) * uCursor.z;
   vec3  Lc = normalize(vec3(uCursor.xy - fc, 300.0 * uPx));
@@ -153,14 +150,18 @@ void main(){
   vec3  col = vec3(0.0);
   float alpha = 0.0;
   float covered = 0.0;
-  if (uLayerRender == 0) col = texture(uOcean, fc * texel).rgb;
+  
+  if (uLayerRender == 0){
+    col = texture(uOcean, fc * texel).rgb;
+    // Apply a soft ambient glow on the water surface from the cursor
+    col += vec3(0.5, 0.8, 1.0) * curW * 0.12;
+  }
 
   for (int i = 0; i < MAX_GLASS; i++){
     if (i >= uGlassCount) break;
     vec4  rect  = uGlassRects[i];
     float r     = uGlassParams[i].x;
     float type  = uGlassParams[i].y;
-    float hover = uGlassParams[i].z;
     float op    = uGlassParams[i].w;
 
     vec2 hs = rect.zw * 0.5;
@@ -178,9 +179,8 @@ void main(){
     vec2  L2 = normalize(sunPx - center + vec2(0.0, 0.001));  
 
     vec3 tint; float tintW, frostLod, shadowW, gel, bevK, thick;
-    material(type, lu, hover, diveFade, tint, tintW, frostLod, shadowW, gel, bevK, thick);
-    float lI   = lightI * (1.0 + 0.15 * hover);
-    float lift = (type > 0.5 && type < 1.5) ? 0.0 : 0.04 * hover;   
+    material(type, lu, tint, tintW, frostLod, shadowW, gel, bevK, thick);
+    float lI   = lightI;
     float bev  = clamp(min(hs.x, hs.y) * bevK, 6.0 * uPx, 30.0 * uPx);
 
     if (shadowW > 0.0){
@@ -225,7 +225,6 @@ void main(){
     vec3  body = (tint * wT + bg * wO) / srcA;
 
     body = mix(body, (body - 0.5) * 1.08 + 0.5, face * (1.0 - tintW));
-    body += lift * face;
     body *= pow(vec3(0.975, 1.0, 1.0), vec3(3.0 * s * s));
 
     vec3  Nf    = normalize(vec3(pn * 0.10, 1.0));
@@ -277,8 +276,9 @@ void main(){
     float specB = (pow(ndh2, 60.0) * 0.30 + pow(ndh2, 10.0) * 0.06) * s;
     float specL = (specS + specB) * lI * (0.45 + 0.55 * sunNear);
 
-    float specC   = pow(clamp(dot(N, Hc), 0.0, 1.0), 40.0) * 0.35 * curW * s;
-    float curFace = curW * 0.06 * face;
+    // Glass catches the cursor light locally
+    float specC   = pow(clamp(dot(N, Hc), 0.0, 1.0), 40.0) * 0.50 * curW * s;
+    float curFace = curW * 0.10 * face;
 
     vec3  spec = hiCol * (specL + specC) + vec3(1.0) * curFace;
 
