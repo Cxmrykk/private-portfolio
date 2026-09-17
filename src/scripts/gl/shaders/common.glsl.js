@@ -33,7 +33,13 @@ vec3 getPrimaryLight(){
 
 vec3 getShaftDir(){
   vec3 primary = getPrimaryLight();
-  return normalize(vec3(primary.x, max(primary.y, 0.05), primary.z));
+  // Ray from light source to the water surface
+  vec3 incident = -normalize(vec3(primary.x, max(primary.y, 0.001), primary.z));
+  // Refract through water surface (normal points UP)
+  // IOR air = 1.0, water = 1.333. Ratio = 0.75018
+  vec3 refracted = refract(incident, vec3(0.0, 1.0, 0.0), 0.75018);
+  // Return vector pointing BACK to the light source from underwater (Snell's Window)
+  return -normalize(refracted);
 }
 
 /* Drags out the sunset and sunrise significantly */
@@ -166,7 +172,12 @@ float getCaustics(vec2 uv){
   float t = uTime * 0.7;
   vec2 p = uv;
   float c = 0.0;
+  
+  // A rotation matrix breaks the perfect orthogonal grid alignment of the sine waves
+  mat2 rot = mat2(0.754, -0.656, 0.656, 0.754); 
+  
   for (int i = 0; i < 3; i++){
+    p = rot * p;
     p = p + vec2(cos(t - p.x), sin(t + p.y));
     c += sin(p.x) * cos(p.y);
   }

@@ -178,7 +178,10 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
 float seabedDepth(){ return mix(-27.0, -12.0, uShallow); }
 
 vec3 seabedColor(vec3 p){
+  float dayW, sunsetW, nightW;
+  getPhaseWeights(dayW, sunsetW, nightW);
   float lightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
+
   vec2 q = p.xz;
   float grain  = fbm(q * 0.55);
   float ripple = sin(q.x * 1.7 + sin(q.y * 1.2) * 1.8) * 0.5 + 0.5;
@@ -188,17 +191,31 @@ vec3 seabedColor(vec3 p){
   sand = mix(sand, vec3(0.10, 0.24, 0.16), weed * 0.70);
   float rocks = smoothstep(0.74, 0.90, fbm(q * 0.95 + 21.0));
   sand = mix(sand, vec3(0.30, 0.32, 0.31), rocks * 0.55);
+
   vec3 s = p + getShaftDir() * ((0.0 - p.y) / getShaftDir().y);
   float c = getCaustics(s.xz * 0.38);
-  sand += vec3(1.0, 0.95, 0.80) * c * 1.15 * exp(p.y * 0.035) * lightI;
-  sand *= mix(0.3, 1.0, lightI);
+
+  // Dynamic Caustics adapting to the phase of day
+  vec3 caustic_day = vec3(1.0, 0.95, 0.80);
+  vec3 caustic_set = vec3(1.0, 0.50, 0.15); // Golden-orange caustics
+  vec3 caustic_nig = vec3(0.30, 0.60, 0.90); // Moonlit / bioluminescent caustics
+  vec3 causticC = caustic_day * dayW + caustic_set * sunsetW + caustic_nig * nightW;
+
+  // Boost night caustic visibility slightly so it's not totally crushed by lightI
+  float causticIntensity = mix(0.4, 1.15, lightI) + (nightW * 0.3);
+  sand += causticC * c * causticIntensity * exp(p.y * 0.035);
+  sand *= mix(0.3, 1.0, lightI) + (nightW * 0.1); 
+
   return sand;
 }
 
 vec3 renderUnder(vec3 ro, vec3 rd){
+  float dayW, sunsetW, nightW;
+  getPhaseWeights(dayW, sunsetW, nightW);
   float lightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
   float bedY = seabedDepth();
   vec3 col; float t;
+
   if (rd.y > 0.035){
     t = min(traceUnderside(ro, rd), 260.0);
     vec3 p = ro + rd * t;
@@ -206,50 +223,143 @@ vec3 renderUnder(vec3 ro, vec3 rd){
     vec3 n = normalize(vec3(-g.x, 1.0, -g.y));
     vec3 nd = -n;
     vec3 refr = refract(rd, nd, 1.333);
+    
     if (dot(refr, refr) > 1e-4){
+      // Snell's Window - Looking out at the sky
       col = sky(normalize(refr)) * 1.06;
       float rim = 1.0 - clamp(dot(-rd, nd), 0.0, 1.0);
-      col += vec3(0.50, 0.86, 0.96) * pow(rim, 6.0) * 0.55 * lightI;
+      
+      vec3 rim_day = vec3(0.50, 0.86, 0.96);
+      vec3 rim_set = vec3(1.00, 0.45, 0.15); // Fiery orange rim catching sunset
+      vec3 rim_nig = vec3(0.20, 0.40, 0.80); // Dark aero cyan rim
+      vec3 rimCol = rim_day * dayW + rim_set * sunsetW + rim_nig * nightW;
+      
+      col += rimCol * pow(rim, 6.0) * 0.55 * lightI;
     } else {
+      // Total Internal Reflection - Looking at the underside of the waves
       vec3 rr = reflect(rd, nd);
       float down = clamp(-rr.y, 0.0, 1.0);
-      col = mix(vec3(0.03, 0.16, 0.24), vec3(0.16, 0.30, 0.28), down);
-      col += vec3(0.20, 0.45, 0.48) * getCaustics(p.xz * 0.45) * 0.35 * lightI;
+      
+      vec3 tirUp_day = vec3(0.16, 0.30, 0.28);
+      vec3 tirDn_day = vec3(0.03, 0.16, 0.24);
+      vec3 tirUp_set = vec3(0.80, 0.35, 0.10); // Glowing sunset orange refracting inside wave
+      vec3 tirDn_set = vec3(0.15, 0.05, 0.10); // Deep purple trough
+      vec3 tirUp_nig = vec3(0.04, 0.10, 0.20); // Moonlit silver
+      vec3 tirDn_nig = vec3(0.01, 0.02, 0.05); // Pitch indigo
+
+      vec3 upC = tirUp_day * dayW + tirUp_set * sunsetW + tirUp_nig * nightW;
+      vec3 dnC = tirDn_day * dayW + tirDn_set * sunsetW + tirDn_nig * nightW;
+      col = mix(dnC, upC, down);
+
+      vec3 uC_day = vec3(0.20, 0.45, 0.48);
+      vec3 uC_set = vec3(0.90, 0.40, 0.10);
+      vec3 uC_nig = vec3(0.10, 0.25, 0.50);
+      vec3 uC = uC_day * dayW + uC_set * sunsetW + uC_nig * nightW;
+      col += uC * getCaustics(p.xz * 0.45) * 0.35 * lightI;
     }
-    col += vec3(0.30, 0.60, 0.62) * getCaustics(p.xz * 0.55) * 0.30 * lightI;
+    vec3 uC2_day = vec3(0.30, 0.60, 0.62);
+    vec3 uC2_set = vec3(1.00, 0.60, 0.20);
+    vec3 uC2_nig = vec3(0.15, 0.35, 0.60);
+    vec3 uC2 = uC2_day * dayW + uC2_set * sunsetW + uC2_nig * nightW;
+    col += uC2 * getCaustics(p.xz * 0.55) * 0.30 * lightI;
+    
   } else if (rd.y < -0.035){
     float tb = (bedY - ro.y) / rd.y;
     t = min(tb, 240.0);
-    col = (tb < 240.0) ? seabedColor(ro + rd * t) : vec3(0.02, 0.09, 0.14) * mix(0.2, 1.0, lightI);
+    
+    vec3 void_day = vec3(0.02, 0.09, 0.14);
+    vec3 void_set = vec3(0.06, 0.03, 0.08); // Dark purple depth
+    vec3 void_nig = vec3(0.01, 0.01, 0.03); // Almost black
+    vec3 voidC = void_day * dayW + void_set * sunsetW + void_nig * nightW;
+
+    col = (tb < 240.0) ? seabedColor(ro + rd * t) : voidC * mix(0.2, 1.0, lightI);
   } else {
     t = 200.0;
-    col = vec3(0.02, 0.09, 0.14) * mix(0.2, 1.0, lightI);
+    vec3 void_day = vec3(0.02, 0.09, 0.14);
+    vec3 void_set = vec3(0.06, 0.03, 0.08);
+    vec3 void_nig = vec3(0.01, 0.01, 0.03);
+    vec3 voidC = void_day * dayW + void_set * sunsetW + void_nig * nightW;
+    col = voidC * mix(0.2, 1.0, lightI);
   }
+  
   float td = min(t, 150.0);
-  vec3 absorbC = vec3(0.155, 0.045, 0.028);
+  
+  // Dynamic Water Absorption (Extinction) based on phase of day
+  vec3 abs_day = vec3(0.155, 0.045, 0.028);
+  vec3 abs_set = vec3(0.120, 0.060, 0.035); // Less red absorption during sunset
+  vec3 abs_nig = vec3(0.180, 0.050, 0.020);
+  vec3 absorbC = abs_day * dayW + abs_set * sunsetW + abs_nig * nightW;
   vec3 ext = exp(-absorbC * td);
+  
   float midY = ro.y + rd.y * td * 0.5;
-  vec3 amb = vec3(0.045, 0.30, 0.42) * exp(clamp(midY, -70.0, 0.0) * 0.045);
-  amb *= mix(0.2, 1.0, lightI);
+  
+  // Ambient Volume Color
+  vec3 amb_day = vec3(0.045, 0.30, 0.42);
+  vec3 amb_set = vec3(0.15, 0.08, 0.12); // Dusty purple/magenta mid-water
+  vec3 amb_nig = vec3(0.015, 0.03, 0.08);
+  vec3 ambBase = amb_day * dayW + amb_set * sunsetW + amb_nig * nightW;
+  
+  vec3 amb = ambBase * exp(clamp(midY, -70.0, 0.0) * 0.045);
+  
+  // Subsurface sunset glow in the upper layers of water
+  float surfGlow = exp(clamp(midY, -15.0, 0.0) * 0.25);
+  amb += vec3(0.8, 0.3, 0.05) * surfGlow * sunsetW * 0.4;
+  
+  amb *= mix(0.2 + (nightW * 0.2), 1.0, lightI);
   col = col * ext + amb * (1.0 - ext);
+  
+  // Volumetric God Rays (Shafts)
   float shaft = 0.0;
   float dith  = hash21(gl_FragCoord.xy * 0.37 + fract(uTime) * 91.0);
   float segLen = min(td, 60.0) / 10.0;
+  vec3 sDir = getShaftDir();
+  
   for (int i = 0; i < 10; i++){
     vec3 sp = ro + rd * (segLen * (float(i) + dith));
     if (sp.y > -0.15) continue;
-    vec3 q = sp + getShaftDir() * ((0.0 - sp.y) / getShaftDir().y);
-    shaft += getCaustics(q.xz * 0.22) * exp(sp.y * 0.05);
+    
+    // Project to surface along the physically refracted shaft direction
+    vec3 q = sp + sDir * ((0.0 - sp.y) / sDir.y);
+    
+    // 3D volumetric drift: shears the light shafts based on depth to simulate water columns
+    vec2 drift = vec2(sin(sp.y * 0.15 + uTime * 0.4), cos(sp.y * 0.15 + uTime * 0.3)) * 0.6;
+    
+    // Softer frequency for volumetric sampling (0.15) and tighter depth falloff (0.08)
+    shaft += getCaustics(q.xz * 0.15 + drift) * exp(sp.y * 0.08);
   }
   shaft /= 10.0;
-  float toSun = clamp(dot(rd, getShaftDir()), 0.0, 1.0);
-  col += vec3(0.42, 0.86, 0.98) * shaft * (0.55 + 1.35 * pow(toSun, 2.2)) * 1.25 * lightI;
+  float toSun = clamp(dot(rd, sDir), 0.0, 1.0);
+  
+  // Dynamic God Rays
+  vec3 shaft_day = vec3(0.42, 0.86, 0.98);
+  vec3 shaft_set = vec3(1.00, 0.65, 0.25); // Golden shafts
+  vec3 shaft_nig = vec3(0.25, 0.45, 0.80); // Bioluminescent / moonlit shafts
+  vec3 shaftCol = shaft_day * dayW + shaft_set * sunsetW + shaft_nig * nightW;
+  
+  // Boost shaft visibility at night so it's not completely crushed by lightI
+  float shaftIntensity = mix(0.15, 1.25, lightI) + (nightW * 0.15); 
+  col += shaftCol * shaft * (0.55 + 1.35 * pow(toSun, 2.2)) * shaftIntensity;
+  
   return col;
 }
 
 /* ---------- bubbles ---------- */
 vec3 addBubbles(vec3 col, vec2 fc, float amount){
   if (amount <= 0.001) return col;
+  
+  float dayW, sunsetW, nightW;
+  getPhaseWeights(dayW, sunsetW, nightW);
+  
+  vec3 bub_day = vec3(0.78, 0.94, 1.0);
+  vec3 bub_set = vec3(1.0, 0.85, 0.6); // Golden bubbles at sunset
+  vec3 bub_nig = vec3(0.2, 0.8, 1.0);  // High saturation cyan for Dark Aero bioluminescence
+  vec3 bubCol = bub_day * dayW + bub_set * sunsetW + bub_nig * nightW;
+
+  vec3 hi_day = vec3(1.0);
+  vec3 hi_set = vec3(1.0, 0.9, 0.8);
+  vec3 hi_nig = vec3(0.7, 0.9, 1.0);
+  vec3 hiCol = hi_day * dayW + hi_set * sunsetW + hi_nig * nightW;
+
   float aspect = uRes.x / uRes.y;
   vec2 p = fc / uRes.y;
   for (int i = 0; i < 18; i++){
@@ -275,8 +385,9 @@ vec3 addBubbles(vec3 col, vec2 fc, float amount){
     vec2  hp = d / rad - vec2(-0.32, 0.34);
     float hi = exp(-dot(hp, hp) * 10.0) * edge;
     float a  = amount * life;
-    col = mix(col, vec3(0.78, 0.94, 1.0), a * (ring * 0.55 + fill));
-    col += vec3(1.0) * hi * 0.65 * a;
+    
+    col = mix(col, bubCol, a * (ring * 0.55 + fill));
+    col += hiCol * hi * 0.65 * a;
   }
   return clamp(col, 0.0, 1.0);
 }
@@ -328,4 +439,5 @@ void main(){
   col = addBubbles(col, gl_FragCoord.xy, smoothstep(0.10, 0.32, d));
 
   fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
-}`;
+}
+`;
