@@ -13,7 +13,9 @@ export const MAX_GLASS = 60;
 const SCISSOR_MARGIN = 28;
 
 const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow', 'uDive', 'uDayTime'];
-const GLASS_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uCursor', 'uPx', 'uScroll', 'uDive',
+/* uShallow: the glass pass rebuilds the ocean camera (shared GLSL) so its
+   glints can use real view rays, camera depth and beam positions. */
+const GLASS_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uCursor', 'uPx', 'uScroll', 'uDive', 'uShallow',
                         'uLayerRender', 'uOcean', 'uGlassCount', 'uGlassRects', 'uGlassParams', 'uDayTime'];
 
 function compile(gl, type, src){
@@ -183,6 +185,7 @@ export function createRenderer(canvasId, { isUI }){
     gl.uniform1f(glass.u.uPx, sx);
     gl.uniform1f(glass.u.uScroll, state.scroll);
     gl.uniform1f(glass.u.uDive, state.dive);
+    gl.uniform1f(glass.u.uShallow, state.shallow);
     gl.uniform1i(glass.u.uLayerRender, isUI ? 1 : 0);
     gl.uniform1i(glass.u.uGlassCount, count);
     gl.uniform4fv(glass.u.uGlassRects, rectsData);

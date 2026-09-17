@@ -4,6 +4,8 @@
    Renders the tone-mapped scene into a texture that the glass
    pass refracts and frosts. Bubbles are drawn here too, so
    they sit behind the glass rather than over it.
+   The camera, water absorption and shaft colour come from
+   GLSL_COMMON so the glass pass lights itself from the same model.
    ============================================================ */
 import { GLSL_COMMON } from './common.glsl.js';
 
@@ -175,8 +177,6 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
 }
 
 /* ---------- underwater ---------- */
-float seabedDepth(){ return mix(-27.0, -12.0, uShallow); }
-
 vec3 seabedColor(vec3 p){
   float dayW, sunsetW, nightW;
   getPhaseWeights(dayW, sunsetW, nightW);
@@ -284,11 +284,8 @@ vec3 renderUnder(vec3 ro, vec3 rd){
   
   float td = min(t, 150.0);
   
-  // Dynamic Water Absorption (Extinction) based on phase of day
-  vec3 abs_day = vec3(0.155, 0.045, 0.028);
-  vec3 abs_set = vec3(0.120, 0.060, 0.035); // Less red absorption during sunset
-  vec3 abs_nig = vec3(0.180, 0.050, 0.020);
-  vec3 absorbC = abs_day * dayW + abs_set * sunsetW + abs_nig * nightW;
+  // Dynamic Water Absorption (Extinction) based on phase of day — shared with the glass pass
+  vec3 absorbC = waterAbsorption(dayW, sunsetW, nightW);
   vec3 ext = exp(-absorbC * td);
   
   float midY = ro.y + rd.y * td * 0.5;
@@ -325,16 +322,14 @@ vec3 renderUnder(vec3 ro, vec3 rd){
     vec2 drift = vec2(sin(sp.y * 0.15 + uTime * 0.4), cos(sp.y * 0.15 + uTime * 0.3)) * 0.6;
     
     // Softer frequency for volumetric sampling (0.15) and tighter depth falloff (0.08)
+    // (glint.glsl.js samples this same field so the glass pulses with the beams)
     shaft += getCaustics(q.xz * 0.15 + drift) * exp(sp.y * 0.08);
   }
   shaft /= 10.0;
   float toSun = clamp(dot(rd, sDir), 0.0, 1.0);
   
-  // Dynamic God Rays
-  vec3 shaft_day = vec3(0.42, 0.86, 0.98);
-  vec3 shaft_set = vec3(1.00, 0.65, 0.25); // Golden shafts
-  vec3 shaft_nig = vec3(0.25, 0.45, 0.80); // Bioluminescent / moonlit shafts
-  vec3 shaftCol = shaft_day * dayW + shaft_set * sunsetW + shaft_nig * nightW;
+  // Dynamic God Rays — palette shared with the glass pass
+  vec3 shaftCol = shaftColour(dayW, sunsetW, nightW);
   
   // Boost shaft visibility at night so it's not completely crushed by lightI
   float shaftIntensity = mix(0.15, 1.25, lightI) + (nightW * 0.15); 
@@ -396,24 +391,12 @@ void main(){
   vec2 uv = (gl_FragCoord.xy * 2.0 - uRes) / uRes.y;
   float d = clamp(uDive, 0.0, 1.0);
   float sub = smoothstep(0.15, 0.60, d);
-  float bedY = seabedDepth();
 
-  float camY;
-  if (d < 0.3){
-    float t = d / 0.3; camY = 3.3 - 7.3 * t * t;
-  } else {
-    float t = (d - 0.3) / 0.7; camY = mix(-4.0, bedY + 1.5, t);
-  }
-  camY += sin(uTime * 0.42) * 0.16;
   uv += vec2(sin(uv.y * 7.0 + uTime * 0.9), cos(uv.x * 6.0 + uTime * 0.75)) * 0.0045 * sub;
 
-  vec3 ro = vec3(uMouse.x * 1.6 + sin(uTime * 0.23) * 0.6 * sub,
-                 camY + uMouse.y * 0.35,
-                 -uTime * 0.78);
-  float pitch = mix(-0.085 - uScroll * 0.02, 0.0, smoothstep(0.0, 0.45, d))
-              + smoothstep(0.30, 0.62, d) * (1.0 - smoothstep(0.70, 1.0, d) * 0.66) * 0.30
-              + uMouse.y * 0.035;
-  vec3 rd = normalize(vec3(uv.x, uv.y + pitch, -1.45));
+  /* camera model lives in GLSL_COMMON (shared with the glass pass) */
+  vec3 ro = camOrigin();
+  vec3 rd = camRay(uv);
 
   vec3 col;
   if (ro.y < waveHeight(ro.xz, 5) - 0.02){

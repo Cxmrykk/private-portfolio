@@ -1,8 +1,10 @@
 /* ============================================================
    Shared GLSL — fullscreen vertex stage and the helpers both
-   passes need (noise, sky, caustics).
-   GLSL_COMMON expects `uniform float uTime;` to be declared by
-   the including shader before the chunk is inserted.
+   passes need (camera, celestial light, water constants, noise,
+   sky, caustics).
+   GLSL_COMMON expects these uniforms to be declared by the
+   including shader before the chunk is inserted:
+     uTime, uMouse, uScroll, uDive, uShallow
    ============================================================ */
 
 export const FULLSCREEN_VERT = `#version 300 es
@@ -59,6 +61,77 @@ vec3 getPrimaryLightCol(){
   vec3 nightCol = vec3(0.50, 0.70, 1.00);
 
   return dayCol * dayW + sunsetCol * sunsetW + nightCol * nightW;
+}
+
+/* Overall scene light level: 0.15 at night, 1.0 in daylight */
+float envLight(){
+  return mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
+}
+
+/* Schlick reflectance of the air/water interface (f0 = 0.02).
+   cosI = cosine between the light and the surface normal, which for
+   a flat sea is simply the light's elevation (dir.y). */
+float waterFresnel(float cosI){
+  return 0.02 + 0.98 * pow(1.0 - clamp(cosI, 0.0, 1.0), 5.0);
+}
+
+/* ---------- water constants shared by both passes ---------- */
+/* Beer-Lambert absorption per unit length, by phase of day */
+vec3 waterAbsorption(float dayW, float sunsetW, float nightW){
+  vec3 abs_day = vec3(0.155, 0.045, 0.028);
+  vec3 abs_set = vec3(0.120, 0.060, 0.035); // Less red absorption during sunset
+  vec3 abs_nig = vec3(0.180, 0.050, 0.020);
+  return abs_day * dayW + abs_set * sunsetW + abs_nig * nightW;
+}
+
+/* Colour of the underwater light shafts, by phase of day */
+vec3 shaftColour(float dayW, float sunsetW, float nightW){
+  vec3 shaft_day = vec3(0.42, 0.86, 0.98);
+  vec3 shaft_set = vec3(1.00, 0.65, 0.25); // Golden shafts
+  vec3 shaft_nig = vec3(0.25, 0.45, 0.80); // Bioluminescent / moonlit shafts
+  return shaft_day * dayW + shaft_set * sunsetW + shaft_nig * nightW;
+}
+
+/* ---------- camera (one model for the ocean and the glass) ---------- */
+float seabedDepth(){ return mix(-27.0, -12.0, uShallow); }
+
+/* Pitch is applied as a shear on the ray, not a rotation, so the
+   camera axes stay aligned with world x / y / -z. */
+float camPitch(){
+  float d = clamp(uDive, 0.0, 1.0);
+  return mix(-0.085 - uScroll * 0.02, 0.0, smoothstep(0.0, 0.45, d))
+       + smoothstep(0.30, 0.62, d) * (1.0 - smoothstep(0.70, 1.0, d) * 0.66) * 0.30
+       + uMouse.y * 0.035;
+}
+
+/* Camera height: the piecewise dive curve + idle bob + mouse lift */
+float camHeight(){
+  float d = clamp(uDive, 0.0, 1.0);
+  float y;
+  if (d < 0.3){
+    float t = d / 0.3; y = 3.3 - 7.3 * t * t;
+  } else {
+    float t = (d - 0.3) / 0.7; y = mix(-4.0, seabedDepth() + 1.5, t);
+  }
+  return y + sin(uTime * 0.42) * 0.16 + uMouse.y * 0.35;
+}
+
+vec3 camOrigin(){
+  float sub = smoothstep(0.15, 0.60, clamp(uDive, 0.0, 1.0));
+  return vec3(uMouse.x * 1.6 + sin(uTime * 0.23) * 0.6 * sub,
+              camHeight(),
+              -uTime * 0.78);
+}
+
+/* uv = (fragCoord * 2 - res) / res.y */
+vec3 camRay(vec2 uv){
+  return normalize(vec3(uv.x, uv.y + camPitch(), -1.45));
+}
+
+/* 0 in air, 1 under water. Crosses over while the camera is within
+   one unit of the waterline, which the splash veil (|camY| < 2) hides. */
+float submergence(){
+  return 1.0 - smoothstep(-1.0, 1.0, camHeight());
 }
 
 /* ---------- noise ---------- */

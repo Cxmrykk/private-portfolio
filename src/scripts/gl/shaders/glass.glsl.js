@@ -4,8 +4,10 @@
    bottom-to-top. uLayerRender 0 writes the base canvas
    (ocean + low-z glass); 1 writes the transparent UI canvas
    (premultiplied alpha) that sits above the DOM.
+   Physical sun / moon / shaft glints live in glint.glsl.js.
    ============================================================ */
 import { GLSL_COMMON } from './common.glsl.js';
+import { GLSL_GLINT } from './glint.glsl.js';
 
 export const GLASS_FRAG = `#version 300 es
 precision highp float;
@@ -17,6 +19,7 @@ uniform vec3  uCursor;      // x, y in canvas px (y up); z = pointer presence 0.
 uniform float uPx;          // canvas pixels per CSS pixel
 uniform float uScroll;
 uniform float uDive;
+uniform float uShallow;     // seabed depth -> camera height -> water path length
 uniform int   uLayerRender; // 0 = base layer, 1 = UI layer
 uniform sampler2D uOcean;
 
@@ -30,6 +33,7 @@ uniform vec4 uGlassParams[MAX_GLASS]; // radius, type, padding, opacity
 out vec4 fragColor;
 
 ${GLSL_COMMON}
+${GLSL_GLINT}
 
 /* rounded-rect signed distance with outward gradient */
 float sdRect(vec2 p, vec2 hs, float r, out vec2 grad){
@@ -42,12 +46,14 @@ float sdRect(vec2 p, vec2 hs, float r, out vec2 grad){
 }
 
 /* where the environment's light sits on screen, in canvas px:
-   the sun/moon above the surface, the light shaft once submerged. */
+   the sun/moon above the surface, the light shaft once submerged.
+   With glints on, the hand-over happens at the waterline (same
+   crossfade the glints use) instead of lerping the direction through
+   angles no real light takes. */
 vec2 lightScreenPos(float d){
-  float pitch = mix(-0.085 - uScroll * 0.02, 0.0, smoothstep(0.0, 0.45, d))
-              + smoothstep(0.30, 0.62, d) * (1.0 - smoothstep(0.70, 1.0, d) * 0.66) * 0.30
-              + uMouse.y * 0.035;
-  vec3 D = normalize(mix(getPrimaryLight(), getShaftDir(), smoothstep(0.15, 0.60, d)));
+  float pitch = camPitch();
+  float k = (GLINT_GAIN > 0.0) ? submergence() : smoothstep(0.15, 0.60, d);
+  vec3 D = normalize(mix(getPrimaryLight(), getShaftDir(), k));
   vec2 uv = D.xy / max(-D.z, 0.05) * 1.45;
   uv.y -= pitch;
   return (uv * uRes.y + uRes) * 0.5;
@@ -137,6 +143,12 @@ void main(){
   vec3  Hsun2  = normalize(Ls2 + V);
   float sunNear = exp(-length(sunPx - fc) / (1100.0 * uPx));
   float oShare = (uLayerRender == 0) ? 1.0 : 0.45;
+
+  /* ---- physical glints: this pixel's world view ray (the ocean's own
+          camera), and the ocean's tone curve for compositing ---- */
+  vec3  rd = camRay((fc * 2.0 - uRes) / uRes.y);
+  float glintExpo = mix(1.28, 1.58, smoothstep(0.15, 0.60, dive));
+  bool  lightsReady = false;   // sources are set up lazily, on the first bevel pixel
 
   /* global cursor glow */
   float curD = length(uCursor.xy - fc);
@@ -281,6 +293,26 @@ void main(){
     float curFace = curW * 0.10 * face;
 
     vec3  spec = hiCol * (specL + specC) + vec3(1.0) * curFace;
+
+    /* ---- physical glints: bevels only, the face is never touched ----
+       The sources sit behind the glass, so no reflection or prism path
+       can reach them until the normal has tilted well off-axis. */
+    if (GLINT_GAIN > 0.0 && s > 0.30){
+      if (!lightsReady){ setupLights(rd); lightsReady = true; }
+
+      /* how fast the bevel normal turns per canvas pixel: d(asin s)/dpx */
+      float tS   = clamp((dist + bev) / bev, 0.0, 1.0);
+      float rate = max(6.0 * tS * (1.0 - tS) / (bev * cI), 0.01);
+
+      vec3 glassCol = (tintW > 0.0) ? tint : vec3(0.84, 0.95, 0.91); // gel dye / crown-glass green
+      vec3 g = glassGlint(rd, N, rate, glassCol) * smoothstep(0.30, 0.45, s);
+
+      /* The ocean's tone curve, then a screen blend. For 1 - exp(-kx),
+         screening in display space IS adding radiance before tone mapping,
+         so a sun the refracted backdrop already shows is not counted twice. */
+      vec3 gD = pow(1.0 - exp(-g * glintExpo), vec3(0.86));
+      spec += gD * (1.0 - clamp(body + spec, 0.0, 1.0));
+    }
 
     if (uLayerRender == 0){
       col = mix(col, body + spec, mask);
