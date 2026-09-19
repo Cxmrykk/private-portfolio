@@ -12,11 +12,11 @@ export const MAX_GLASS = 60;
 /* CSS px of ocean rendered around each UI panel (covers shadow + refraction reach) */
 const SCISSOR_MARGIN = 28;
 
-const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow', 'uDive', 'uSunDir', 'uMoonDir'];
+const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow', 'uDive', 'uSunDir', 'uMoonDir', 'uRandoms'];
 /* uShallow: the glass pass rebuilds the ocean camera (shared GLSL) so its
    glints can use real view rays, camera depth and beam positions. */
 const GLASS_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uCursor', 'uPx', 'uScroll', 'uDive', 'uShallow',
-                        'uLayerRender', 'uOcean', 'uGlassCount', 'uGlassRects', 'uGlassParams', 'uSunDir', 'uMoonDir'];
+                        'uLayerRender', 'uOcean', 'uGlassCount', 'uGlassRects', 'uGlassParams', 'uSunDir', 'uMoonDir', 'uRandoms'];
 
 function compile(gl, type, src){
   const sh = gl.createShader(type);
@@ -84,6 +84,12 @@ export function createRenderer(canvasId, { isUI }){
   const rectsData  = new Float32Array(MAX_GLASS * 4);
   const paramsData = new Float32Array(MAX_GLASS * 4);
   const scissors = [];
+
+  /* Pre-calculate 64 random vec4s for the shaders to replace hash functions inside loops */
+  const randoms = new Float32Array(64 * 4);
+  for (let i = 0; i < 256; i++) {
+    randoms[i] = Math.random();
+  }
 
   function resize(w, h){
     if (canvas.width === w && canvas.height === h) return;
@@ -153,6 +159,7 @@ export function createRenderer(canvasId, { isUI }){
     gl.uniform1f(ocean.u.uChop, state.chop);
     gl.uniform1f(ocean.u.uShallow, state.shallow);
     gl.uniform1f(ocean.u.uDive, state.dive);
+    gl.uniform4fv(ocean.u.uRandoms, randoms);
 
     if (isUI){
       gl.clearColor(0, 0, 0, 0);
@@ -192,6 +199,8 @@ export function createRenderer(canvasId, { isUI }){
     gl.uniform1i(glass.u.uGlassCount, count);
     gl.uniform4fv(glass.u.uGlassRects, rectsData);
     gl.uniform4fv(glass.u.uGlassParams, paramsData);
+    gl.uniform4fv(glass.u.uRandoms, randoms);
+    
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform1i(glass.u.uOcean, 0);

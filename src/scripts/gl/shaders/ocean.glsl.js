@@ -19,6 +19,7 @@ uniform float uScroll;
 uniform float uChop;
 uniform float uShallow;
 uniform float uDive;
+uniform vec4  uRandoms[64]; // Pre-calculated randomness offloaded from CPU
 
 out vec4 fragColor;
 
@@ -31,6 +32,8 @@ float waveField(vec2 p, float dist, int max_octaves, out vec2 grad){
   float amp = 0.62, freq = 0.30, speed = 1.0, k = 1.60 * uChop;
   float ang = 0.0;
   vec2 warp = vec2(0.0);
+  
+  // Standard linear LOD scaling
   float pixel_width = max(dist * 0.0035, 0.001);
 
   for (int i = 0; i < 14; i++){
@@ -93,7 +96,7 @@ float traceUnderside(vec3 ro, vec3 rd){
 vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
   vec3 refl = reflect(rd, n);
   refl.y = max(refl.y, 0.015);
-  vec3 skyCol = sky(refl);
+  vec3 skyCol = sky(refl, false); // Volumetric clouds disabled for rough ocean reflections
 
   float dayW, sunsetW, nightW;
   getPhaseWeights(dayW, sunsetW, nightW);
@@ -167,7 +170,7 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
   col = mix(col, vec3(0.9, 0.95, 1.0), foam * 0.5 * uChop * lightI);
 
   float fog = 1.0 - exp(-dist * 0.0035);
-  col = mix(col, sky(vec3(rd.x, 0.004, rd.z)), fog);
+  col = mix(col, sky(vec3(rd.x, 0.004, rd.z), false), fog); // Clouds disabled for horizon fog
 
   return col;
 }
@@ -219,7 +222,7 @@ vec3 renderUnder(vec3 ro, vec3 rd){
     vec3 refr = refract(rd, nd, 1.333);
     
     if (dot(refr, refr) > 1e-4){
-      col = sky(normalize(refr)) * 1.06;
+      col = sky(normalize(refr), false) * 1.06; // Clouds disabled for refracted sky through surface
       float rim = 1.0 - clamp(dot(-rd, nd), 0.0, 1.0);
       
       vec3 rim_day = vec3(0.50, 0.86, 0.96);
@@ -293,6 +296,8 @@ vec3 renderUnder(vec3 ro, vec3 rd){
   
   float shaft = 0.0;
   float dith  = hash21(gl_FragCoord.xy * 0.37 + fract(uTime) * 91.0);
+  
+  // Reverted to 10 volumetric steps for smooth rendering and to prevent Moire banding
   float segLen = min(td, 60.0) / 10.0;
   vec3 sDir = getShaftDir();
   
@@ -331,11 +336,11 @@ vec3 addBubbles(vec3 col, vec3 ro, vec3 rd, float amount){
   float focalZ = 2.5; // Focal plane distance for Depth of Field
   
   for (int i = 0; i < 40; i++){
-    float fi = float(i);
-    float h1 = hash21(vec2(fi, 1.7));
-    float h2 = hash21(vec2(fi, 9.3));
-    float h3 = hash21(vec2(fi, 4.1));
-    float h4 = hash21(vec2(fi, 6.6));
+    vec4 rnd = uRandoms[i];
+    float h1 = rnd.x;
+    float h2 = rnd.y;
+    float h3 = rnd.z;
+    float h4 = rnd.w;
     
     // Physics: Buoyancy speed depends heavily on bubble radius
     float radius = mix(0.015, 0.08, h2 * h2);
@@ -436,7 +441,7 @@ void main(){
   } else {
     vec3 p; float t = traceOcean(ro, rd, p);
     if (t < 0.0){
-      col = sky(rd);
+      col = sky(rd, true); // Direct sky view, full clouds rendered
     } else {
       vec2 g; waveField(p.xz, t, 14, g);
       vec3 n = normalize(vec3(-g.x, 1.0, -g.y));

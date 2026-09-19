@@ -22,6 +22,7 @@ uniform float uDive;
 uniform float uShallow;     // seabed depth -> camera height -> water path length
 uniform int   uLayerRender; // 0 = base layer, 1 = UI layer
 uniform sampler2D uOcean;
+uniform vec4 uRandoms[64];  // Pre-calculated randomness offloaded from CPU
 
 #define MAX_GLASS 60
 #define GLASS_BUBBLES 5     // bubbles trapped in each panel/card; 0 to disable
@@ -57,7 +58,7 @@ vec2 lightScreenPos(float d){
 float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
 
 vec3 envReflect(vec3 R, float dive){
-  vec3 skyC = sky(normalize(vec3(R.x * 0.9, max(R.y, 0.0) * 0.85 + 0.06, -0.5)));
+  vec3 skyC = sky(normalize(vec3(R.x * 0.9, max(R.y, 0.0) * 0.85 + 0.06, -0.5)), false);
   skyC = pow(1.0 - exp(-skyC * 1.28), vec3(0.86));
   vec3 up    = mix(vec3(luma(skyC)), skyC, 0.30);
   vec3 down  = mix(vec3(0.22, 0.26, 0.30), vec3(0.62, 0.68, 0.74), clamp(R.y + 1.0, 0.0, 1.0));
@@ -240,10 +241,9 @@ void main(){
     // --- 3D Physically Refractive Bubbles (Trapped in Gel) ---
     if (gel < 0.5){
       for (int b = 0; b < GLASS_BUBBLES; b++){
-        float fb = float(b) * 7.0 + float(i) * 13.0;
-        vec2  bc = rect.xy + rect.zw * mix(vec2(0.08), vec2(0.92),
-                                           vec2(hash21(vec2(fb, 1.3)), hash21(vec2(fb, 7.7))));
-        float br = mix(2.0, 5.5, hash21(vec2(fb, 4.4))) * uPx;
+        vec4 rnd = uRandoms[(i * GLASS_BUBBLES + b) % 64];
+        vec2 bc = rect.xy + rect.zw * mix(vec2(0.08), vec2(0.92), rnd.xy);
+        float br = mix(2.0, 5.5, rnd.z) * uPx;
         vec2  d  = fc - bc;
         float r2 = dot(d, d);
         float br2 = br * br;

@@ -159,7 +159,7 @@ float fbm(vec2 p){
 }
 
 /* ---------- sky ---------- */
-vec3 sky(vec3 rd){
+vec3 sky(vec3 rd, bool renderClouds){
   float y = clamp(rd.y, -0.15, 1.0);
   vec3 sunDir = getSunDir();
   vec3 moonDir = getMoonDir();
@@ -251,8 +251,8 @@ vec3 sky(vec3 rd){
     col += vec3(1.0) * starMask * nightW * smoothstep(0.0, 0.1, rd.y) * (1.0 - moonMask * visibility);
   }
 
-  // Volumetric Clouds catching fire
-  if (rd.y > 0.004){
+  // Volumetric Clouds catching fire (Optimized out for reflections)
+  if (renderClouds && rd.y > 0.004){
     vec2 cp = rd.xz / max(rd.y, 0.055);
     float drift = uTime * 0.0055;
     float f = fbm(cp * 0.52 + vec2(drift, drift * 0.35));
