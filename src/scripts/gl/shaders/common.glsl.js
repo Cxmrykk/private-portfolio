@@ -4,7 +4,7 @@
    sky, caustics).
    GLSL_COMMON expects these uniforms to be declared by the
    including shader before the chunk is inserted:
-     uTime, uMouse, uScroll, uDive, uShallow
+     uTime, uMouse, uScroll, uDive, uShallow, uSunDir, uMoonDir
    ============================================================ */
 
 export const FULLSCREEN_VERT = `#version 300 es
@@ -14,23 +14,23 @@ void main(){
 }`;
 
 export const GLSL_COMMON = `
-uniform float uDayTime; // 0.0 to 24.0
+uniform vec3 uSunDir;
+uniform vec3 uMoonDir;
 
 /* ---------- lighting / celestial ---------- */
 vec3 getSunDir(){
-  float a = (uDayTime - 6.0) / 24.0 * 6.283185;
-  return normalize(vec3(cos(a) * 0.8, sin(a), -0.7));
+  return normalize(uSunDir);
 }
 
 vec3 getMoonDir(){
-  float a = (uDayTime - 6.0) / 24.0 * 6.283185 + 3.14159;
-  return normalize(vec3(cos(a) * 0.8, sin(a), -0.7));
+  return normalize(uMoonDir);
 }
 
 vec3 getPrimaryLight(){
   vec3 s = getSunDir();
   vec3 m = getMoonDir();
-  return s.y > m.y ? s : m; // Whichever is higher in the sky
+  // The Sun is vastly brighter. If it is anywhere near the horizon or above, it dominates.
+  return s.y > -0.05 ? s : m; 
 }
 
 vec3 getShaftDir(){
@@ -186,8 +186,9 @@ vec3 sky(vec3 rd){
 
   // Blend based on view height
   float hF = clamp(rd.y, 0.0, 1.0);
-  vec3 col = mix(horizon, mid, smoothstep(0.0, 0.35, hF));
-  col = mix(col, zenith, smoothstep(0.15, 1.0, hF));
+  vec3 baseSky = mix(horizon, mid, smoothstep(0.0, 0.35, hF));
+  baseSky = mix(baseSky, zenith, smoothstep(0.15, 1.0, hF));
+  vec3 col = baseSky;
 
   // Sun rendering - Traditional core
   float sd = max(dot(rd, sunDir), 0.0);
@@ -204,17 +205,50 @@ vec3 sky(vec3 rd){
   sunHalo += vec3(1.00, 0.80, 0.40) * pow(sdStretch, 350.0) * 3.0 * sunsetW; // Wide bright core
   col += sunHalo;
 
-  // Moon rendering
-  float md = max(dot(rd, moonDir), 0.0);
-  vec3 moonHalo = vec3(0.8, 0.9, 1.0) * pow(md, 2000.0) * 10.0;
-  moonHalo += vec3(0.5, 0.7, 1.0) * pow(md, 100.0) * 0.5;
-  col += moonHalo * nightW;
+  // Moon rendering (Frutiger Aero Stylized: Glowing, glassy, pristine orb)
+  float md = dot(rd, moonDir);
+  float mRadius = 0.998; 
+  float moonMask = smoothstep(mRadius - 0.0003, mRadius + 0.0003, md);
+  
+  // Reconstruct the 3D surface normal of the moon for smooth shading
+  vec3 delta = rd - moonDir * md;
+  float maxDelta = sqrt(max(0.0, 1.0 - mRadius * mRadius));
+  vec3 normDelta = delta / max(maxDelta, 0.0001); 
+  float nz = sqrt(max(0.0, 1.0 - dot(normDelta, normDelta)));
+  vec3 moonNormal = normalize(normDelta + moonDir * nz);
+  
+  // Clearer phase definition: tighter smoothstep creates a distinct terminator line
+  float ndotl = dot(moonNormal, sunDir);
+  float diffuse = smoothstep(-0.08, 0.35, ndotl); 
+  
+  // Glossy Fresnel rim light
+  float fresnel = pow(1.0 - max(dot(moonNormal, -rd), 0.0), 3.0);
+  
+  // Ethereal Aero colors: distinct contrast between lit and dark
+  vec3 moonLit = vec3(0.95, 0.98, 1.0) + vec3(0.5, 0.75, 1.0) * pow(diffuse, 2.0); // Bright core
+  vec3 moonDark = mix(baseSky * 0.4, vec3(0.02, 0.15, 0.35), 0.65); // Deep, distinct shadow
+  
+  vec3 moonSurface = mix(moonDark, moonLit, diffuse);
+  
+  // Rim light heavily favors the lit side to avoid outlining the dark side incorrectly during a crescent
+  moonSurface += vec3(0.5, 0.85, 1.0) * fresnel * mix(0.1, 1.2, diffuse);
+  
+  // Only visible during sunset/night so it doesn't punch dark holes in the day sky
+  float visibility = smoothstep(0.0, 0.5, nightW + sunsetW);
+  
+  // Bright atmospheric halo behind the moon
+  vec3 moonHalo = vec3(0.4, 0.7, 1.0) * pow(max(md, 0.0), 600.0) * 0.6 * visibility;
+  col += moonHalo;
+  
+  // Composite moon disk
+  col = mix(col, moonSurface, moonMask * visibility);
 
   // Stars rendering
   if (nightW > 0.0 && rd.y > 0.0) {
     float starNoise = hash21(rd.xz / max(rd.y, 0.01) * 250.0 + 12.34);
     float starMask = smoothstep(0.995, 1.0, starNoise);
-    col += vec3(1.0) * starMask * nightW * smoothstep(0.0, 0.1, rd.y) * (1.0 - pow(md, 2.0));
+    // (1.0 - moonMask * visibility) ensures stars never render ON top of the moon
+    col += vec3(1.0) * starMask * nightW * smoothstep(0.0, 0.1, rd.y) * (1.0 - moonMask * visibility);
   }
 
   // Volumetric Clouds catching fire

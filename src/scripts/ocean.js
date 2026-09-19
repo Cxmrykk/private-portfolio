@@ -1,6 +1,7 @@
 import { Dive } from './dive.js';
 import { createRenderer } from './gl/renderer.js';
 import { scanGlass, syncBlurLayer } from './gl/glass-scan.js';
+import { getAstronomy } from './astronomy.js';
 
 /* ============================================================
    THE OCEAN — orchestrator
@@ -26,12 +27,16 @@ export function initOcean(){
 
   const state = {
     clock: 0,
-    dayTime: getLocalDecimalHour(),  // matches the real-world browser time
+    date: new Date(),
+    dayTime: getLocalDecimalHour(),  // Mapped reliably to the 24h clock for the slider
+    sunDir: [0, 1, 0],               // Updated dynamically from astronomy.js
+    moonDir: [0, -1, 0],
     mouseX: 0, mouseY: 0,            // parallax, normalised -1..1
     cursorX: -1e4, cursorY: -1e4,    // pointer light, CSS px
     cursorOn: 0,
     scroll: 0, chop: 1.0, shallow: 0.0, dive: 0
   };
+  
   const target = { x: 0, y: 0, cx: -1e4, cy: -1e4, on: 0 };
   let shallowTarget = 0.0;
   let last = performance.now();
@@ -42,19 +47,17 @@ export function initOcean(){
   let overrideTimeout = null;
   const ctrlTime = document.getElementById('ctrl-time');
 
-  function updateCSSColors(dayTime) {
-    const sunY = Math.sin((dayTime - 6.0) / 24.0 * Math.PI * 2) * 0.8;
-    
+  function updateCSSColors(sunY) {
     // Sync to shader's widened twilight zone
     const dayW = Math.max(0, Math.min(1, (sunY - 0.15) / (0.6 - 0.15)));
-    const nightW = 1.0 - Math.max(0, Math.min(1, (sunY - (-0.3)) / (0.0 - (-0.3))));
+    const nightW = 1.0 - Math.max(0, Math.min(1, (sunY - (-0.30)) / (0.0 - (-0.30))));
     const sunsetW = Math.max(0, 1.0 - (dayW + nightW));
 
     const lerp = (c1, c2, c3, w1, w2, w3) => c1.map((v, i) => Math.round(v * w1 + c2[i] * w2 + c3[i] * w3));
     
     // 3-stop palettes mapped identically to common.glsl.js
     const dayZ = [15, 82, 186];  const dayM = [97, 173, 240];  const dayH = [209, 240, 255];
-    const setZ = [20, 56, 97];   const setM = [166, 77, 89];   const setH = [255, 102, 26]; // Deep teal zenith, rosy mid, fiery horizon
+    const setZ = [20, 56, 97];   const setM = [166, 77, 89];   const setH = [255, 102, 26];
     const nigZ = [3, 5, 13];     const nigM = [5, 13, 25];     const nigH = [13, 31, 51];
 
     const z = lerp(dayZ, setZ, nigZ, dayW, sunsetW, nightW);
@@ -73,7 +76,7 @@ export function initOcean(){
     state.dive = Dive.value;
     const dpr = window.devicePixelRatio || 1;
     base.draw(state, layers.base, Math.min(dpr, 1.5) * scale);
-    ui.draw(state, layers.ui, Math.min(dpr, 2));  // full DPR: crisp rims, mostly discarded
+    ui.draw(state, layers.ui, Math.min(dpr, 2)); 
   }
 
   function frame(now){
@@ -83,10 +86,18 @@ export function initOcean(){
     if (!paused) {
       state.clock += dt;
       if (!manualTimeOverride) {
-        state.dayTime = getLocalDecimalHour();
-        if (ctrlTime) ctrlTime.value = state.dayTime * 100;
+        state.date = new Date();
+        state.dayTime = getLocalDecimalHour(); // Driven by actual local clock
+        if (ctrlTime) {
+          ctrlTime.value = state.dayTime * 100;
+        }
       }
     }
+
+    // Process positional orbits
+    const astro = getAstronomy(state.date, state.dayTime);
+    state.sunDir = astro.sun;
+    state.moonDir = astro.moon;
 
     if (dt > 0.032){ slow++; } else { slow = Math.max(0, slow - 1); }
     if (slow > 45 && !downshifted){ downshifted = true; scale = 0.5; }
@@ -101,7 +112,7 @@ export function initOcean(){
     state.scroll += (sTarget - state.scroll) * 0.08;
     state.shallow += (shallowTarget - state.shallow) * 0.04;
 
-    updateCSSColors(state.dayTime);
+    updateCSSColors(state.sunDir[1]);
     render();
     if (running) requestAnimationFrame(frame);
   }
@@ -110,8 +121,14 @@ export function initOcean(){
     state.scroll = Math.min(window.scrollY / Math.max(window.innerHeight, 1), 1.5);
   }
 
-  updateCSSColors(state.dayTime);
+  // Initial Astronomical Load
+  const initAstro = getAstronomy(state.date, state.dayTime);
+  state.sunDir = initAstro.sun;
+  state.moonDir = initAstro.moon;
+  
+  updateCSSColors(state.sunDir[1]);
   render();
+  
   window.addEventListener('resize', () => { if (!running) render(); });
   window.addEventListener('scroll', () => { if (!running){ syncScroll(); render(); } }, { passive: true });
   Dive.onUpdate(() => { if (!running){ syncScroll(); render(); } });
@@ -140,6 +157,7 @@ export function initOcean(){
 
   if (ctrlTime) {
     ctrlTime.value = state.dayTime * 100;
+    
     ctrlTime.addEventListener('input', (e) => {
       state.dayTime = parseFloat(e.target.value) / 100;
       manualTimeOverride = true;
@@ -149,7 +167,10 @@ export function initOcean(){
       overrideTimeout = setTimeout(() => { manualTimeOverride = false; }, 5000);
       
       if (!running || paused) {
-        updateCSSColors(state.dayTime);
+        const astro = getAstronomy(state.date, state.dayTime);
+        state.sunDir = astro.sun;
+        state.moonDir = astro.moon;
+        updateCSSColors(state.sunDir[1]);
         render();
       }
     });
