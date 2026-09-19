@@ -45,11 +45,6 @@ float sdRect(vec2 p, vec2 hs, float r, out vec2 grad){
   return d;
 }
 
-/* where the environment's light sits on screen, in canvas px:
-   the sun/moon above the surface, the light shaft once submerged.
-   With glints on, the hand-over happens at the waterline (same
-   crossfade the glints use) instead of lerping the direction through
-   angles no real light takes. */
 vec2 lightScreenPos(float d){
   float pitch = camPitch();
   float k = (GLINT_GAIN > 0.0) ? submergence() : smoothstep(0.15, 0.60, d);
@@ -112,6 +107,9 @@ void main(){
   vec2  texel = 1.0 / uRes;
   float margin = 28.0 * uPx;
 
+  float dayW, sunsetW, nightW;
+  getPhaseWeights(dayW, sunsetW, nightW);
+
   if (uLayerRender == 1){
     bool near = false;
     for (int i = 0; i < MAX_GLASS; i++){
@@ -126,7 +124,6 @@ void main(){
   float dive = clamp(uDive, 0.0, 1.0);
   float diveFade = smoothstep(0.0, 0.5, dive);
 
-  /* ---- dynamic environment light ---- */
   vec3  V      = vec3(0.0, 0.0, 1.0);
   vec2  sunPx  = lightScreenPos(dive);
   float envLightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
@@ -144,13 +141,10 @@ void main(){
   float sunNear = exp(-length(sunPx - fc) / (1100.0 * uPx));
   float oShare = (uLayerRender == 0) ? 1.0 : 0.45;
 
-  /* ---- physical glints: this pixel's world view ray (the ocean's own
-          camera), and the ocean's tone curve for compositing ---- */
   vec3  rd = camRay((fc * 2.0 - uRes) / uRes.y);
   float glintExpo = mix(1.28, 1.58, smoothstep(0.15, 0.60, dive));
-  bool  lightsReady = false;   // sources are set up lazily, on the first bevel pixel
+  bool  lightsReady = false;
 
-  /* global cursor glow */
   float curD = length(uCursor.xy - fc);
   float curW = exp(-curD / (320.0 * uPx)) * uCursor.z;
   vec3  Lc = normalize(vec3(uCursor.xy - fc, 300.0 * uPx));
@@ -165,7 +159,6 @@ void main(){
   
   if (uLayerRender == 0){
     col = texture(uOcean, fc * texel).rgb;
-    // Apply a soft ambient glow on the water surface from the cursor
     col += vec3(0.5, 0.8, 1.0) * curW * 0.12;
   }
 
@@ -244,22 +237,60 @@ void main(){
     body += hiCol * sheen;
     body += hiCol * dapple * 0.06 * diveFade * face;
 
+    // --- 3D Physically Refractive Bubbles (Trapped in Gel) ---
     if (gel < 0.5){
       for (int b = 0; b < GLASS_BUBBLES; b++){
         float fb = float(b) * 7.0 + float(i) * 13.0;
         vec2  bc = rect.xy + rect.zw * mix(vec2(0.08), vec2(0.92),
                                            vec2(hash21(vec2(fb, 1.3)), hash21(vec2(fb, 7.7))));
-        float br = mix(2.0, 4.5, hash21(vec2(fb, 4.4))) * uPx;
+        float br = mix(2.0, 5.5, hash21(vec2(fb, 4.4))) * uPx;
         vec2  d  = fc - bc;
-        float rr = length(d) / br;
-        if (rr < 1.0){
-          float edge = 1.0 - smoothstep(0.90, 1.0, rr);
-          float ring = smoothstep(0.55, 0.92, rr) * edge;
-          float dark = ring * clamp(-dot(d / br, L2) * 0.5 + 0.3, 0.0, 1.0);
-          vec2  hp = d / br - L2 * 0.45;
-          float hi = exp(-dot(hp, hp) * 9.0) * edge;
-          body *= 1.0 - dark * 0.22;
-          body = mix(body, vec3(1.0), (ring * 0.35 + hi * 0.70) * lI);
+        float r2 = dot(d, d);
+        float br2 = br * br;
+        
+        if (r2 < br2){
+          float dist = sqrt(r2);
+          
+          // Construct 3D Normal for the trapped bubble
+          float z = sqrt(max(0.0, br2 - r2));
+          vec3  Nb = normalize(vec3(d.x, d.y, z));
+          
+          float f = 1.0 - Nb.z; // Fresnel mapped to flat Z-view
+          
+          // Refraction Darkening Center
+          vec3 bCol = body * mix(0.4, 0.9, Nb.z);
+          
+          // Frutiger Aero Prismatic Chromatic Aberration
+          vec3 ca = vec3(pow(f, 3.0), pow(f, 2.4), pow(f, 1.8));
+          vec3 prismCol = mix(vec3(0.2, 0.8, 1.0), vec3(1.0, 0.5, 0.1), sunsetW) * ca * 1.5;
+          
+          // Dark rim for physical contrast (TIR edge)
+          vec3 darkRim = mix(vec3(0.0, 0.1, 0.2), vec3(0.1, 0.02, 0.0), sunsetW);
+          bCol = mix(bCol, darkRim, smoothstep(0.7, 1.0, f));
+          bCol += prismCol * smoothstep(0.1, 0.8, f);
+          
+          // Map 3D Specular Highlight using L2
+          vec3 L_b = normalize(vec3(L2.x, L2.y, 0.7)); 
+          vec3 H_b = normalize(L_b + vec3(0.0, 0.0, 1.0));
+          
+          // Hyper-sharp primary glint
+          float specMain = pow(max(dot(Nb, H_b), 0.0), 300.0) * 4.0;
+          
+          // Anamorphic horizontal flare
+          vec2 l2_safe = length(L2) > 0.001 ? normalize(L2) : vec2(0.0, 1.0);
+          vec3 tangent = vec3(-l2_safe.y, l2_safe.x, 0.0);
+          float flare = pow(max(dot(Nb, H_b), 0.0), 50.0) * pow(max(1.0 - abs(dot(Nb, tangent)), 0.0), 10.0) * 1.5;
+          
+          // Softbox / Studio top reflection
+          float softbox = smoothstep(0.4, 1.0, dot(Nb, normalize(vec3(0.0, 1.0, 0.5)))) * 0.4;
+          
+          // Inner pool glow (bottom bounce volume)
+          float innerGlow = smoothstep(0.1, -0.8, dot(Nb, vec3(0.0, 1.0, 0.0))) * 0.4;
+          
+          bCol += (specMain + flare + softbox + innerGlow) * hiCol * lI;
+          
+          float aa = smoothstep(br, br - 0.8 * uPx, dist);
+          body = mix(body, bCol, aa);
         }
       }
     }
@@ -288,28 +319,20 @@ void main(){
     float specB = (pow(ndh2, 60.0) * 0.30 + pow(ndh2, 10.0) * 0.06) * s;
     float specL = (specS + specB) * lI * (0.45 + 0.55 * sunNear);
 
-    // Glass catches the cursor light locally
     float specC   = pow(clamp(dot(N, Hc), 0.0, 1.0), 40.0) * 0.50 * curW * s;
     float curFace = curW * 0.10 * face;
 
     vec3  spec = hiCol * (specL + specC) + vec3(1.0) * curFace;
 
-    /* ---- physical glints: bevels only, the face is never touched ----
-       The sources sit behind the glass, so no reflection or prism path
-       can reach them until the normal has tilted well off-axis. */
     if (GLINT_GAIN > 0.0 && s > 0.30){
       if (!lightsReady){ setupLights(rd); lightsReady = true; }
 
-      /* how fast the bevel normal turns per canvas pixel: d(asin s)/dpx */
       float tS   = clamp((dist + bev) / bev, 0.0, 1.0);
       float rate = max(6.0 * tS * (1.0 - tS) / (bev * cI), 0.01);
 
-      vec3 glassCol = (tintW > 0.0) ? tint : vec3(0.84, 0.95, 0.91); // gel dye / crown-glass green
+      vec3 glassCol = (tintW > 0.0) ? tint : vec3(0.84, 0.95, 0.91); 
       vec3 g = glassGlint(rd, N, rate, glassCol) * smoothstep(0.30, 0.45, s);
 
-      /* The ocean's tone curve, then a screen blend. For 1 - exp(-kx),
-         screening in display space IS adding radiance before tone mapping,
-         so a sun the refracted backdrop already shows is not counted twice. */
       vec3 gD = pow(1.0 - exp(-g * glintExpo), vec3(0.86));
       spec += gD * (1.0 - clamp(body + spec, 0.0, 1.0));
     }
