@@ -19,9 +19,14 @@ export function initOcean(){
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let scale = window.innerWidth > 1500 ? 0.72 : 0.85;
 
+  function getLocalDecimalHour() {
+    const d = new Date();
+    return d.getHours() + (d.getMinutes() / 60) + (d.getSeconds() / 3600) + (d.getMilliseconds() / 3600000);
+  }
+
   const state = {
     clock: 0,
-    dayTime: 12.0,                   // 24-hour cycle: 12 = noon
+    dayTime: getLocalDecimalHour(),  // matches the real-world browser time
     mouseX: 0, mouseY: 0,            // parallax, normalised -1..1
     cursorX: -1e4, cursorY: -1e4,    // pointer light, CSS px
     cursorOn: 0,
@@ -78,7 +83,7 @@ export function initOcean(){
     if (!paused) {
       state.clock += dt;
       if (!manualTimeOverride) {
-        state.dayTime = (state.dayTime + dt * 0.6) % 24.0; // 0.6 hours per sec (40s for full loop)
+        state.dayTime = getLocalDecimalHour();
         if (ctrlTime) ctrlTime.value = state.dayTime * 100;
       }
     }
