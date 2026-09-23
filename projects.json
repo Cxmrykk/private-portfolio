@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Bus arrival forecasting from live GPS feeds",
+    "description": "Ingested a year of city transit pings, rebuilt each trip's progress along its route, and predicted arrival time at the next four stops. Gradient boosting on trip-so-far features beat the agency's static timetable, especially in the evening peak.",
+    "result": "Mean absolute error 2.4 min, down from 5.1",
+    "tags": ["Python", "LightGBM", "DuckDB", "GeoPandas"]
+  },
+  {
+    "title": "Coral bleaching detection in satellite tiles",
+    "description": "Fine-tuned a small ResNet on Sentinel-2 reef imagery with a reviewed label set of 3,800 tiles. Cloud and sun-glint tiles were the main failure mode, so I added a masking step before inference and reported per-reef accuracy rather than a single global score.",
+    "result": "F1 0.87 on unseen reefs",
+    "tags": ["PyTorch", "Sentinel-2", "rasterio", "Weights & Biases"]
+  },
+  {
+    "title": "Campus energy anomaly monitor",
+    "description": "Half-hourly meter readings from 14 buildings, decomposed into seasonal and residual components, with residuals scored for outliers. Facilities now get a Monday digest; the first month surfaced a chiller running through two semester breaks.",
+    "result": "31 flagged events, 24 confirmed real",
+    "tags": ["statsmodels", "scikit-learn", "Airflow", "Postgres"]
+  },
+  {
+    "title": "Search across four semesters of lecture notes",
+    "description": "A weekend project that stuck. Notes and slide text are chunked, embedded and served through a small local API, so I can ask a question in plain language and get the three passages that answer it. Evaluated against 120 questions I wrote myself.",
+    "result": "Recall@3 of 0.91",
+    "tags": ["sentence-transformers", "FAISS", "FastAPI", "SQLite"]
+  }
+]
