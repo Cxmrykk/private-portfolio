@@ -27,18 +27,18 @@ export async function initProjects() {
     
     // Construct and inject each project card
     projects.forEach(proj => {
-      const article = document.createElement('article');
+      // Changed to an anchor tag to act as a hyperlink
+      const article = document.createElement('a');
       article.className = 'card glass';
+      article.href = proj.link || '#';
+      article.target = '_blank';
+      article.rel = 'noopener noreferrer';
       
       const h3 = document.createElement('h3');
       h3.textContent = proj.title;
       
       const p = document.createElement('p');
       p.textContent = proj.description;
-      
-      const resultSpan = document.createElement('span');
-      resultSpan.className = 'result';
-      resultSpan.textContent = proj.result;
       
       const chipsDiv = document.createElement('div');
       chipsDiv.className = 'chips';
@@ -51,7 +51,6 @@ export async function initProjects() {
       
       article.appendChild(h3);
       article.appendChild(p);
-      article.appendChild(resultSpan);
       article.appendChild(chipsDiv);
       
       container.appendChild(article);
