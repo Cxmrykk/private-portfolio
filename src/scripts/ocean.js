@@ -40,8 +40,15 @@ export function initOcean(){
   const target = { x: 0, y: 0, cx: -1e4, cy: -1e4, on: 0 };
   let shallowTarget = 0.0;
   let last = performance.now();
-  let running = !reduced, paused = false;
+  let running = false, paused = false;
   let slow = 0, downshifted = false;
+
+  /* The one pending animation-frame request. Every scheduling path goes
+     through startLoop()/stopLoop(), so at most one loop can ever exist.
+     (Previously, a callback queued before the tab was hidden survived
+     the hide and ran alongside the new one on return, adding a whole
+     extra render loop on every tab switch.) */
+  let rafId = 0;
 
   let manualTimeOverride = false;
   let overrideTimeout = null;
@@ -80,6 +87,8 @@ export function initOcean(){
   }
 
   function frame(now){
+    rafId = 0;
+
     const dt = Math.min((now - last) / 1000, 0.05);
     last = now;
 
@@ -114,7 +123,22 @@ export function initOcean(){
 
     updateCSSColors(state.sunDir[1]);
     render();
-    if (running) requestAnimationFrame(frame);
+    if (running) rafId = requestAnimationFrame(frame);
+  }
+
+  function startLoop(){
+    running = true;
+    if (rafId !== 0) return;          // a frame is already queued
+    last = performance.now();
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function stopLoop(){
+    running = false;
+    if (rafId !== 0){
+      cancelAnimationFrame(rafId);    // drop the queued frame, don't just orphan it
+      rafId = 0;
+    }
   }
 
   function syncScroll(){
@@ -144,11 +168,11 @@ export function initOcean(){
   window.addEventListener('pointercancel', () => { target.on = 0; }, { passive: true });
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden){ running = false; }
-    else if (!reduced && !paused){ running = true; last = performance.now(); requestAnimationFrame(frame); }
+    if (document.hidden){ stopLoop(); }
+    else if (!reduced && !paused){ startLoop(); }
   });
 
-  if (!reduced) requestAnimationFrame(frame);
+  if (!reduced) startLoop();
 
   /* ---- water controls ---- */
   const ctrlChop = document.getElementById('ctrl-chop');
@@ -199,9 +223,7 @@ export function initOcean(){
       ctrlPlay.setAttribute('aria-pressed', String(paused));
       ctrlPlay.textContent = paused ? 'Resume Animation' : 'Pause Animation';
       if (!paused && !running && !document.hidden && !reduced){
-        running = true;
-        last = performance.now();
-        requestAnimationFrame(frame);
+        startLoop();
       }
     });
   }

@@ -17,6 +17,12 @@ export const GLSL_COMMON = `
 uniform vec3 uSunDir;
 uniform vec3 uMoonDir;
 
+/* Moon fade thresholds, in sky luminance. The moon is fully visible
+   when the sky behind it is darker than LO and invisible above HI.
+   Night zenith ~0.02, golden-hour zenith ~0.20, day zenith ~0.29. */
+#define MOON_FADE_LO 0.03
+#define MOON_FADE_HI 0.14
+
 /* ---------- lighting / celestial ---------- */
 vec3 getSunDir(){
   return normalize(uSunDir);
@@ -50,6 +56,32 @@ void getPhaseWeights(out float dayW, out float sunsetW, out float nightW){
   dayW = smoothstep(0.15, 0.60, sunY);
   nightW = 1.0 - smoothstep(-0.30, 0.0, sunY);
   sunsetW = max(0.0, 1.0 - (dayW + nightW));
+}
+
+/* Rec. 601 luminance */
+float skyLuma(vec3 c){
+  return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+/* Zenith colour of the sky for the current phase blend */
+vec3 skyZenithCol(float dayW, float sunsetW, float nightW){
+  vec3 dayZ = vec3(0.06, 0.32, 0.73);
+  vec3 setZ = vec3(0.08, 0.22, 0.38); // Deep teal/blue zenith
+  vec3 nigZ = vec3(0.01, 0.02, 0.05);
+  return dayZ * dayW + setZ * sunsetW + nigZ * nightW;
+}
+
+/* Moon visibility driven by light intensity rather than sun angle.
+   The ambient term is the brightness of the sky dome (zenith luminance),
+   which stays high through golden hour and only drops once the night
+   palette takes over. localLuma adds any extra glow behind the moon
+   (sun halo, sunset burn) so it also washes out near the afterglow.
+   Pass 0.0 when there is no per-pixel context (e.g. glints). */
+float moonVisibility(float localLuma){
+  float dayW, sunsetW, nightW;
+  getPhaseWeights(dayW, sunsetW, nightW);
+  float ambient = skyLuma(skyZenithCol(dayW, sunsetW, nightW));
+  return 1.0 - smoothstep(MOON_FADE_LO, MOON_FADE_HI, ambient + localLuma);
 }
 
 vec3 getPrimaryLightCol(){
@@ -168,19 +200,16 @@ vec3 sky(vec3 rd, bool renderClouds){
   getPhaseWeights(dayW, sunsetW, nightW);
 
   // 3-Stop Dynamic Palettes (Horizon, Mid-Sky, Zenith)
-  vec3 dayZ = vec3(0.06, 0.32, 0.73);
   vec3 dayM = vec3(0.38, 0.68, 0.94);
   vec3 dayH = vec3(0.82, 0.94, 1.00);
 
-  vec3 setZ = vec3(0.08, 0.22, 0.38); // Deep teal/blue zenith
   vec3 setM = vec3(0.65, 0.30, 0.35); // Dusty rose/magenta transition
   vec3 setH = vec3(1.00, 0.40, 0.10); // Fiery orange horizon
 
-  vec3 nigZ = vec3(0.01, 0.02, 0.05);
   vec3 nigM = vec3(0.02, 0.05, 0.10);
   vec3 nigH = vec3(0.05, 0.12, 0.20);
 
-  vec3 zenith = dayZ * dayW + setZ * sunsetW + nigZ * nightW;
+  vec3 zenith = skyZenithCol(dayW, sunsetW, nightW);
   vec3 mid    = dayM * dayW + setM * sunsetW + nigM * nightW;
   vec3 horizon= dayH * dayW + setH * sunsetW + nigH * nightW;
 
@@ -233,8 +262,10 @@ vec3 sky(vec3 rd, bool renderClouds){
   // Rim light heavily favors the lit side to avoid outlining the dark side incorrectly during a crescent
   moonSurface += vec3(0.5, 0.85, 1.0) * fresnel * mix(0.1, 1.2, diffuse);
   
-  // Only visible during sunset/night so it doesn't punch dark holes in the day sky
-  float visibility = smoothstep(0.0, 0.5, nightW + sunsetW);
+  // Visibility from light intensity: the sky dome's brightness plus any
+  // sun glow at this pixel. Golden hour keeps the dome bright, so the
+  // moon stays hidden until the night palette takes over.
+  float visibility = moonVisibility(skyLuma(sunHalo));
   
   // Bright atmospheric halo behind the moon
   vec3 moonHalo = vec3(0.4, 0.7, 1.0) * pow(max(md, 0.0), 600.0) * 0.6 * visibility;
@@ -266,7 +297,7 @@ vec3 sky(vec3 rd, bool renderClouds){
 
     vec3 cloud = cloudDay * dayW + cloudSunset * sunsetW + cloudNight * nightW;
     cloud += vec3(1.0, 0.90, 0.72) * pow(sd, 8.0) * 0.30 * (dayW + sunsetW);
-    cloud += vec3(0.6, 0.8, 1.0) * pow(md, 8.0) * 0.20 * nightW;
+    cloud += vec3(0.6, 0.8, 1.0) * pow(max(md, 0.0), 8.0) * 0.20 * nightW * visibility;
     
     col = mix(col, cloud, f * band * 0.94);
   }

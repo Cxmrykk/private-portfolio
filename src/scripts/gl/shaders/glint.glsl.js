@@ -61,7 +61,10 @@ void setupLights(vec3 rd){
   gSunCol     = sunTint * litW * sunUp * air * SUN_HDR;
   gSunCore    = dayW / max(litW, 1e-3);           // sky(): hard core by day only
   gSunStretch = sunsetW * sunUp * air * SUN_HDR;  // sky(): squashed burn at sunset
-  gMoonCol    = vec3(0.55, 0.75, 1.00) * nightW * moonUp * air * MOON_HDR;
+
+  /* Same light-intensity fade sky() uses for the moon disc, so the glass
+     never reflects a moon the sky is not drawing. */
+  gMoonCol    = vec3(0.55, 0.75, 1.00) * moonVisibility(0.0) * moonUp * air * MOON_HDR;
 
   /* glitter path: the source mirrored in the sea, weighted by the
      water's own Fresnel reflectance at that elevation */

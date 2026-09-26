@@ -115,25 +115,37 @@ body.is-underwater .glass{
 }
 
 /* ---------- water controls (expandable sliders) ---------- */
+/* One shared width for the whole group: the panel and its toggle
+   button both stretch to it, so the menu opens flush above the
+   button with matching left and right edges. */
 .sea-controls{
+  --sea-controls-w:220px;
   position:fixed; right:16px; bottom:16px; z-index:30;
-  display:flex; flex-direction:column; align-items:flex-end; gap:10px;
+  width:min(var(--sea-controls-w), calc(100vw - 32px));
+  display:flex; flex-direction:column; align-items:stretch; gap:10px;
 }
+
+/* Settings toggle: a real button so tap/keyboard focus opens the panel
+   via :focus-within. 44px tall to meet touch-target guidance; the glass
+   pass draws the pill from its box and border-radius. */
 .sea-status{
-  display:flex; align-items:center; gap:8px; 
-  padding:6px 14px 6px 6px; border-radius:999px;
-  cursor:default; outline:none;
+  display:flex; align-items:center; justify-content:center;
+  width:100%; min-height:44px;
+  padding:12px 26px; margin:0;
+  border-radius:999px;
+  font:inherit; color:inherit;
+  cursor:pointer;
+  -webkit-appearance:none; appearance:none;
 }
-.sea-status .divider {
-  width:1px; height:20px;
-  background:linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,0.3) 50%, rgba(255,255,255,0));
+.settings-hint{
+  font:600 14.5px/1 "Segoe UI",Tahoma,sans-serif; letter-spacing:.01em;
+  color:#e8f8ff; text-shadow:0 1px 3px rgba(0,0,0,0.7);
 }
-.settings-hint{font:600 13px/1 "Segoe UI",Tahoma,sans-serif; color:#d4f0ff; text-shadow:0 1px 3px rgba(0,0,0,0.7)}
 
 .sea-panel{
   padding:18px 20px; border-radius:var(--panel-radius);
   display:flex; flex-direction:column; gap:16px;
-  width:220px;
+  width:100%;
   opacity:0; visibility:hidden; transform:translateY(10px);
   transition:opacity .3s ease, transform .3s ease, visibility 0s .3s;
   pointer-events:none;
@@ -200,19 +212,6 @@ body.is-underwater .glass{
   box-shadow:inset 0 1px 0 #fff, 0 2px 6px -3px rgba(0,0,0,.7);
 }
 
-.gauge{
-  display:flex; align-items:center; gap:7px;
-  font:600 12.5px/1 "Segoe UI",Tahoma,sans-serif; color:#d4f0ff;
-  padding:0 4px; white-space:nowrap;
-  text-shadow:0 1px 3px rgba(0,0,0,0.7);
-}
-.gauge .dot{
-  width:9px; height:9px; border-radius:50%; flex:none;
-  background:radial-gradient(circle at 35% 30%, #fff, #7fd3ff 45%, #0b6fb4 100%);
-  box-shadow:0 0 8px rgba(40,170,230,.8);
-}
-.gauge #depth{min-width:54px; display:inline-block; text-align:right; font-variant-numeric:tabular-nums}
-
 /* ---------- a11y ---------- */
 a:focus-visible, button:focus-visible{
   outline:3px solid #ffe08a; outline-offset:3px; border-radius:999px;
@@ -226,4 +225,3 @@ a:focus-visible, button:focus-visible{
 @media (max-width:860px){
   /* Inherit standard layout behaviors on small screens */
 }
-

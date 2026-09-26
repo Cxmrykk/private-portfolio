@@ -22,10 +22,8 @@ uniform float uDive;
 uniform float uShallow;     // seabed depth -> camera height -> water path length
 uniform int   uLayerRender; // 0 = base layer, 1 = UI layer
 uniform sampler2D uOcean;
-uniform vec4 uRandoms[64];  // Pre-calculated randomness offloaded from CPU
 
 #define MAX_GLASS 60
-#define GLASS_BUBBLES 5     // bubbles trapped in each panel/card; 0 to disable
 #define IOR 1.52            // crown glass
 uniform int  uGlassCount;
 uniform vec4 uGlassRects[MAX_GLASS];  // x, y, w, h  (canvas px, y up)
@@ -68,8 +66,7 @@ vec3 envReflect(vec3 R, float dive){
   return mix(above, below, dive);
 }
 
-void material(float type, vec2 lu, out vec3 tint, out float tintW, out float frostLod, out float shadowW, out float gel, out float bevK, out float thick){
-  gel = 0.0;
+void material(float type, vec2 lu, out vec3 tint, out float tintW, out float frostLod, out float shadowW, out float bevK, out float thick){
   tint = vec3(1.0);
   if (type < 0.5){
     tintW = 0.0;
@@ -84,14 +81,12 @@ void material(float type, vec2 lu, out vec3 tint, out float tintW, out float fro
     tintW = 0.80;
     frostLod = 0.6;
     shadowW = 0.26;
-    gel = 1.0;
     bevK = 0.50;
     thick = 1.2;
   } else if (type < 2.5){
     tintW = 0.0;
     frostLod = 0.0;
     shadowW = 0.16;
-    gel = 1.0;
     bevK = 0.50;
     thick = 1.2;
   } else {
@@ -107,9 +102,6 @@ void main(){
   vec2  fc = gl_FragCoord.xy;
   vec2  texel = 1.0 / uRes;
   float margin = 28.0 * uPx;
-
-  float dayW, sunsetW, nightW;
-  getPhaseWeights(dayW, sunsetW, nightW);
 
   if (uLayerRender == 1){
     bool near = false;
@@ -184,8 +176,8 @@ void main(){
     vec2  pn = p / hs;                                        
     vec2  L2 = normalize(sunPx - center + vec2(0.0, 0.001));  
 
-    vec3 tint; float tintW, frostLod, shadowW, gel, bevK, thick;
-    material(type, lu, tint, tintW, frostLod, shadowW, gel, bevK, thick);
+    vec3 tint; float tintW, frostLod, shadowW, bevK, thick;
+    material(type, lu, tint, tintW, frostLod, shadowW, bevK, thick);
     float lI   = lightI;
     float bev  = clamp(min(hs.x, hs.y) * bevK, 6.0 * uPx, 30.0 * uPx);
 
@@ -237,63 +229,6 @@ void main(){
     float sheen = pow(clamp(dot(Nf, Hsun), 0.0, 1.0), 6.0) * 0.16 * lI * (0.4 + 0.6 * sunNear) * face;
     body += hiCol * sheen;
     body += hiCol * dapple * 0.06 * diveFade * face;
-
-    // --- 3D Physically Refractive Bubbles (Trapped in Gel) ---
-    if (gel < 0.5){
-      for (int b = 0; b < GLASS_BUBBLES; b++){
-        vec4 rnd = uRandoms[(i * GLASS_BUBBLES + b) % 64];
-        vec2 bc = rect.xy + rect.zw * mix(vec2(0.08), vec2(0.92), rnd.xy);
-        float br = mix(2.0, 5.5, rnd.z) * uPx;
-        vec2  d  = fc - bc;
-        float r2 = dot(d, d);
-        float br2 = br * br;
-        
-        if (r2 < br2){
-          float dist = sqrt(r2);
-          
-          // Construct 3D Normal for the trapped bubble
-          float z = sqrt(max(0.0, br2 - r2));
-          vec3  Nb = normalize(vec3(d.x, d.y, z));
-          
-          float f = 1.0 - Nb.z; // Fresnel mapped to flat Z-view
-          
-          // Refraction Darkening Center
-          vec3 bCol = body * mix(0.4, 0.9, Nb.z);
-          
-          // Frutiger Aero Prismatic Chromatic Aberration
-          vec3 ca = vec3(pow(f, 3.0), pow(f, 2.4), pow(f, 1.8));
-          vec3 prismCol = mix(vec3(0.2, 0.8, 1.0), vec3(1.0, 0.5, 0.1), sunsetW) * ca * 1.5;
-          
-          // Dark rim for physical contrast (TIR edge)
-          vec3 darkRim = mix(vec3(0.0, 0.1, 0.2), vec3(0.1, 0.02, 0.0), sunsetW);
-          bCol = mix(bCol, darkRim, smoothstep(0.7, 1.0, f));
-          bCol += prismCol * smoothstep(0.1, 0.8, f);
-          
-          // Map 3D Specular Highlight using L2
-          vec3 L_b = normalize(vec3(L2.x, L2.y, 0.7)); 
-          vec3 H_b = normalize(L_b + vec3(0.0, 0.0, 1.0));
-          
-          // Hyper-sharp primary glint
-          float specMain = pow(max(dot(Nb, H_b), 0.0), 300.0) * 4.0;
-          
-          // Anamorphic horizontal flare
-          vec2 l2_safe = length(L2) > 0.001 ? normalize(L2) : vec2(0.0, 1.0);
-          vec3 tangent = vec3(-l2_safe.y, l2_safe.x, 0.0);
-          float flare = pow(max(dot(Nb, H_b), 0.0), 50.0) * pow(max(1.0 - abs(dot(Nb, tangent)), 0.0), 10.0) * 1.5;
-          
-          // Softbox / Studio top reflection
-          float softbox = smoothstep(0.4, 1.0, dot(Nb, normalize(vec3(0.0, 1.0, 0.5)))) * 0.4;
-          
-          // Inner pool glow (bottom bounce volume)
-          float innerGlow = smoothstep(0.1, -0.8, dot(Nb, vec3(0.0, 1.0, 0.0))) * 0.4;
-          
-          bCol += (specMain + flare + softbox + innerGlow) * hiCol * lI;
-          
-          float aa = smoothstep(br, br - 0.8 * uPx, dist);
-          body = mix(body, bCol, aa);
-        }
-      }
-    }
 
     float band = smoothstep(0.12, 0.50, s) * (1.0 - smoothstep(0.50, 0.92, s));
     body *= 1.0 - band * 0.16 * (1.0 - 0.5 * facing);

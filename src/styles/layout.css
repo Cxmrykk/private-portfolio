@@ -13,18 +13,11 @@ header.bar{
   border-radius:999px;
 }
 .mark{
-  display:flex; align-items:center; gap:10px;
+  display:flex; align-items:center;
+  padding:0 6px;
   font-size:15px; font-weight:600; letter-spacing:.01em; color:var(--deep);
   text-decoration:none;
   text-shadow:0 1px 3px rgba(0,0,0,0.7);
-}
-.orb{
-  width:24px; height:24px; border-radius:50%;
-  background:
-    radial-gradient(circle at 34% 26%, #ffffff, rgba(255,255,255,.35) 30%, #3fc0f0 56%, #0a72b6 100%);
-  box-shadow:inset 0 -4px 8px rgba(3,55,92,.5), 0 2px 8px rgba(24,150,215,.6);
-  border:1px solid rgba(255,255,255,.7);
-  flex:none;
 }
 nav.bar-nav{margin-left:auto; display:flex; gap:6px; flex-wrap:wrap}
 nav.bar-nav a{
@@ -152,4 +145,3 @@ footer a{color:#fff}
   .about{grid-template-columns:1fr}
   nav.bar-nav{width:100%; margin-left:0}
 }
-

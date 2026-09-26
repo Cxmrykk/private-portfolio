@@ -3,11 +3,14 @@
    ============================================================ */
 export const Dive = (function () {
   const splash  = document.getElementById('splash');
-  const readout = document.getElementById('depth');
   const body    = document.body;
   const shallowSlider = document.getElementById('ctrl-shallow');
 
-  let target = 0, current = 0, camY = 3.3, raf = null, under = false, lastTxt = '';
+  /* The first (surface-breaking) dive phase ends when this section
+     reaches the top of the viewport. */
+  const ANCHOR_ID = 'projects';
+
+  let target = 0, current = 0, camY = 3.3, raf = null, under = false;
   const listeners = [];
 
   /* dynamically calculate seabed based on UI slider */
@@ -17,7 +20,7 @@ export const Dive = (function () {
   }
 
   /* piecewise depth mapping:
-     Phase 1 (0.0 - 0.3): scroll to #work, dive from 3.3 to -4.0 (a satisfying initial plunge)
+     Phase 1 (0.0 - 0.3): scroll to #projects, dive from 3.3 to -4.0 (a satisfying initial plunge)
      Phase 2 (0.3 - 1.0): scroll to bottom, dive from -4.0 to a safe margin above floor */
   function camFromDive(d) {
     if (d < 0.3) {
@@ -43,11 +46,6 @@ export const Dive = (function () {
     if (!under && camY < 0.15) { under = true;  body.classList.add('is-underwater'); }
     else if (under && camY > 0.9) { under = false; body.classList.remove('is-underwater'); }
 
-    if (readout) {
-      const txt = camY > 0 ? 'Surface' : (-camY * 1.55).toFixed(1) + ' m';
-      if (txt !== lastTxt) { readout.textContent = txt; lastTxt = txt; }
-    }
-
     for (let i = 0; i < listeners.length; i++) listeners[i](current);
   }
 
@@ -59,19 +57,19 @@ export const Dive = (function () {
   }
 
   function measure() {
-    const workEl = document.getElementById('work');
-    const workTop = workEl ? workEl.offsetTop : window.innerHeight;
+    const anchorEl = document.getElementById(ANCHOR_ID);
+    const anchorTop = anchorEl ? anchorEl.offsetTop : window.innerHeight;
     const scrollY = window.scrollY;
 
-    if (scrollY <= workTop) {
-      /* Phase 1: Top of page to the #work section */
-      target = 0.3 * (scrollY / Math.max(1, workTop));
+    if (scrollY <= anchorTop) {
+      /* Phase 1: top of page to the #projects section */
+      target = 0.3 * (scrollY / Math.max(1, anchorTop));
     } else {
-      /* Phase 2: #work section down to the absolute bottom footer */
+      /* Phase 2: #projects section down to the absolute bottom footer */
       const maxScroll = Math.max(1, document.body.scrollHeight - window.innerHeight);
-      const remaining = scrollY - workTop;
-      const totalRemaining = maxScroll - workTop;
-      
+      const remaining = scrollY - anchorTop;
+      const totalRemaining = maxScroll - anchorTop;
+
       if (totalRemaining > 0) {
         target = 0.3 + 0.7 * Math.min(1, remaining / totalRemaining);
       } else {
@@ -86,14 +84,20 @@ export const Dive = (function () {
   window.addEventListener('resize', measure);
   window.addEventListener('load', measure);
 
-  /* recalculate depth readout if user drags the proximity slider */
+  /* Project cards arrive asynchronously and change the page height
+     after 'load' has fired; re-measure whenever the layout grows. */
+  if ('ResizeObserver' in window) {
+    new ResizeObserver(() => measure()).observe(document.body);
+  }
+
+  /* re-apply the camera depth if user drags the proximity slider */
   if (shallowSlider) {
     shallowSlider.addEventListener('input', () => {
       if (raf === null) raf = requestAnimationFrame(loop);
     });
   }
 
-  /* wait a tick for DOM layout to get accurate offsetTop for the #work element */
+  /* wait a tick for DOM layout to get an accurate offsetTop for the anchor */
   setTimeout(() => {
     measure();
     current = target;
