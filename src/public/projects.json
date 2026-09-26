@@ -1,26 +1,26 @@
 [
   {
-    "title": "Bus arrival forecasting from live GPS feeds",
-    "description": "Ingested a year of city transit pings, rebuilt each trip's progress along its route, and predicted arrival time at the next four stops. Gradient boosting on trip-so-far features beat the agency's static timetable, especially in the evening peak.",
-    "result": "Mean absolute error 2.4 min, down from 5.1",
-    "tags": ["Python", "LightGBM", "DuckDB", "GeoPandas"]
+    "title": "DCPM-ADMS (Automated Defect Measurement System)",
+    "description": "Led a team of 6 at Optik Consultancy to build a specialized Python-based software suite for road surface defect measurement. Orchestrates a complex CV pipeline leveraging YOLOv8 for detection and SAM2 for pixel-precise segmentation. Extracts GoPro GPMF telemetry to perform homographic projections and generate orthographic Bird's Eye View maps.",
+    "result": "Delivered to client for DRFA assessments",
+    "tags": ["Python", "Flask", "YOLOv8", "SAM2", "OpenCV"]
   },
   {
-    "title": "Coral bleaching detection in satellite tiles",
-    "description": "Fine-tuned a small ResNet on Sentinel-2 reef imagery with a reviewed label set of 3,800 tiles. Cloud and sun-glint tiles were the main failure mode, so I added a masking step before inference and reported per-reef accuracy rather than a single global score.",
-    "result": "F1 0.87 on unseen reefs",
-    "tags": ["PyTorch", "Sentinel-2", "rasterio", "Weights & Biases"]
+    "title": "html-chat",
+    "description": "A high-performance, single-file web application providing a portable interface for OpenAI-compatible LLM APIs. Built with vanilla JavaScript and HTML/CSS, it leverages IndexedDB for persistent storage and features a local Retrieval-Augmented Generation (RAG) engine supporting custom chunking and vector embedding directly in the browser.",
+    "result": "Fully client-side RAG & JS execution",
+    "tags": ["JavaScript", "IndexedDB", "LLMs", "RAG"]
   },
   {
-    "title": "Campus energy anomaly monitor",
-    "description": "Half-hourly meter readings from 14 buildings, decomposed into seasonal and residual components, with residuals scored for outliers. Facilities now get a Monday digest; the first month surfaced a chiller running through two semester breaks.",
-    "result": "31 flagged events, 24 confirmed real",
-    "tags": ["statsmodels", "scikit-learn", "Airflow", "Postgres"]
+    "title": "yt-dlp-tube",
+    "description": "A privacy-focused, self-hosted YouTube frontend that uses yt-dlp to extract direct media streams, bypassing tracking and algorithmic feeds. Features a custom HTML5 video player with dual-audio synchronization, native SponsorBlock integration, robust VTT subtitle support, and an edge-caching system to mitigate bandwidth throttling.",
+    "result": "Zero-database local JSON architecture",
+    "tags": ["Python", "Flask", "yt-dlp", "SponsorBlock"]
   },
   {
-    "title": "Search across four semesters of lecture notes",
-    "description": "A weekend project that stuck. Notes and slide text are chunked, embedded and served through a small local API, so I can ask a question in plain language and get the three passages that answer it. Evaluated against 120 questions I wrote myself.",
-    "result": "Recall@3 of 0.91",
-    "tags": ["sentence-transformers", "FAISS", "FastAPI", "SQLite"]
+    "title": "BerryAuto",
+    "description": "A sophisticated C++ daemon transforming Linux-based single-board computers (like the Raspberry Pi 4) into wired Android Auto receivers. Leverages the AOA protocol and EVDI kernel module to create a virtual monitor, streaming hardware-accelerated H.264/HEVC video to vehicle head units with dynamic EDID injection.",
+    "result": "Plug-and-play automotive display integration",
+    "tags": ["C++", "Linux FunctionFS", "EVDI", "FFmpeg"]
   }
 ]
