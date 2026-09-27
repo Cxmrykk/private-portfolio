@@ -53,8 +53,55 @@
         <p class="lede">A curated selection of my recent industry internships and personal technical projects, spanning computer vision pipelines, embedded automotive systems, and privacy-focused web applications.</p>
       </div>
 
+      <!-- Each card carries a Funky Seasons class (see seasons.css),
+           which the WebGL glass pass reads back as its dye colour. -->
       <div class="work" id="projects-container">
-        <p class="lede">Fetching projects from source...</p>
+
+        <a class="card glass season-summer" data-season="summer" href="https://github.com/Cxmrykk/DCPM-ADMS" target="_blank" rel="noopener noreferrer">
+          <h3>DCPM-ADMS (Automated Defect Measurement System)</h3>
+          <p>Led a team of 6 at Optik Consultancy to build a specialized Python-based software suite for road surface defect measurement. Orchestrates a complex CV pipeline leveraging YOLOv8 for detection and SAM2 for pixel-precise segmentation. Extracts GoPro GPMF telemetry to perform homographic projections and generate orthographic Bird's Eye View maps.</p>
+          <div class="chips">
+            <b>Python</b>
+            <b>Flask</b>
+            <b>YOLOv8</b>
+            <b>SAM2</b>
+            <b>OpenCV</b>
+          </div>
+        </a>
+
+        <a class="card glass season-winter" data-season="winter" href="https://github.com/Cxmrykk/html-chat" target="_blank" rel="noopener noreferrer">
+          <h3>html-chat</h3>
+          <p>A high-performance, single-file web application providing a portable interface for OpenAI-compatible LLM APIs. Built with vanilla JavaScript and HTML/CSS, it leverages IndexedDB for persistent storage and features a local Retrieval-Augmented Generation (RAG) engine supporting custom chunking and vector embedding directly in the browser.</p>
+          <div class="chips">
+            <b>JavaScript</b>
+            <b>IndexedDB</b>
+            <b>LLMs</b>
+            <b>RAG</b>
+          </div>
+        </a>
+
+        <a class="card glass season-spring" data-season="spring" href="https://github.com/Cxmrykk/yt-dlp-tube" target="_blank" rel="noopener noreferrer">
+          <h3>yt-dlp-tube</h3>
+          <p>A privacy-focused, self-hosted YouTube frontend that uses yt-dlp to extract direct media streams, bypassing tracking and algorithmic feeds. Features a custom HTML5 video player with dual-audio synchronization, native SponsorBlock integration, robust VTT subtitle support, and an edge-caching system to mitigate bandwidth throttling.</p>
+          <div class="chips">
+            <b>Python</b>
+            <b>Flask</b>
+            <b>yt-dlp</b>
+            <b>SponsorBlock</b>
+          </div>
+        </a>
+
+        <a class="card glass season-autumn" data-season="autumn" href="https://github.com/Cxmrykk/BerryAuto" target="_blank" rel="noopener noreferrer">
+          <h3>BerryAuto</h3>
+          <p>A sophisticated C++ daemon transforming Linux-based single-board computers (like the Raspberry Pi 4) into wired Android Auto receivers. Leverages the AOA protocol and EVDI kernel module to create a virtual monitor, streaming hardware-accelerated H.264/HEVC video to vehicle head units with dynamic EDID injection.</p>
+          <div class="chips">
+            <b>C++</b>
+            <b>Linux FunctionFS</b>
+            <b>EVDI</b>
+            <b>FFmpeg</b>
+          </div>
+        </a>
+
       </div>
     </section>
 

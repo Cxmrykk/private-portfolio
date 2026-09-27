@@ -80,8 +80,9 @@ export const Dive = (function () {
   window.addEventListener('resize', measure);
   window.addEventListener('load', measure);
 
-  /* Project cards arrive asynchronously and change the page height
-     after 'load' has fired; re-measure whenever the layout grows. */
+  /* Late layout changes (web fonts swapping in, text reflow) can change
+     the page height after 'load' has fired; re-measure whenever the
+     layout grows or shrinks. */
   if ('ResizeObserver' in window) {
     new ResizeObserver(() => measure()).observe(document.body);
   }
