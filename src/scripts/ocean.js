@@ -7,7 +7,24 @@ import { getAstronomy } from './astronomy.js';
    THE OCEAN — orchestrator
    Two contexts (base canvas under the DOM, UI canvas above it)
    share one frame state; each does ocean → texture → glass.
+
+   GPU budget:
+   - Frames are capped at TARGET_FPS. The water moves slowly, so
+     60 fps is indistinguishable from 120/144 Hz, and each frame
+     is two full ocean passes.
+   - A frame is only drawn when its inputs changed (clock, sliders,
+     dive, scroll, pointer, glass layout). While paused and settled
+     the GPU does no work at all.
    ============================================================ */
+
+const TARGET_FPS = 60;
+const FRAME_MS = 1000 / TARGET_FPS;
+/* Slack so a 60 Hz display (16.67 ms) never loses frames to vsync jitter */
+const FRAME_SLACK_MS = 2;
+
+/* Absolute tolerance for "nothing changed" (px, seconds, 0..1 values) */
+const SIG_EPS = 1e-3;
+
 export function initOcean(){
   const base = createRenderer('sea', { isUI: false });
   const ui   = createRenderer('ui-glass', { isUI: true });
@@ -50,6 +67,12 @@ export function initOcean(){
      extra render loop on every tab switch.) */
   let rafId = 0;
 
+  /* Inputs of the last frame actually drawn; see frameSignature() */
+  let lastSig = null;
+
+  /* Last CSS sky palette written, so unchanged values aren't re-set */
+  let cssKey = '';
+
   let manualTimeOverride = false;
   let overrideTimeout = null;
   const ctrlTime = document.getElementById('ctrl-time');
@@ -70,24 +93,73 @@ export function initOcean(){
     const z = lerp(dayZ, setZ, nigZ, dayW, sunsetW, nightW);
     const m = lerp(dayM, setM, nigM, dayW, sunsetW, nightW);
     const h = lerp(dayH, setH, nigH, dayW, sunsetW, nightW);
+    const blend = (dayW + sunsetW).toFixed(3);
+
+    /* Writing custom properties on <html> invalidates style for the
+       whole page, so only do it when a value actually changed. */
+    const key = z.join() + '|' + m.join() + '|' + h.join() + '|' + blend;
+    if (key === cssKey) return;
+    cssKey = key;
 
     document.documentElement.style.setProperty('--sky-zenith', `rgb(${z[0]},${z[1]},${z[2]})`);
     document.documentElement.style.setProperty('--sky-mid', `rgb(${m[0]},${m[1]},${m[2]})`);
     document.documentElement.style.setProperty('--sky-horizon', `rgb(${h[0]},${h[1]},${h[2]})`);
-    document.documentElement.style.setProperty('--light-blend', (dayW + sunsetW).toFixed(3));
+    document.documentElement.style.setProperty('--light-blend', blend);
   }
 
-  function render(){
+  /* Everything that can change what either canvas shows. If none of it
+     moved since the last drawn frame, the new frame would be identical. */
+  function frameSignature(layers, dpr){
+    const sig = [
+      state.clock, state.dayTime,
+      state.mouseX, state.mouseY,
+      state.cursorX, state.cursorY, state.cursorOn,
+      state.scroll, state.chop, state.shallow, state.dive,
+      window.innerWidth, window.innerHeight, dpr, scale
+    ];
+    for (const list of [layers.base, layers.ui]){
+      sig.push(list.length);
+      for (const it of list){
+        const r = it.rect;
+        sig.push(r.left, r.top, r.width, r.height, it.op, it.z);
+      }
+    }
+    return sig;
+  }
+
+  function sameSignature(a, b){
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++){
+      if (Math.abs(a[i] - b[i]) > SIG_EPS) return false;
+    }
+    return true;
+  }
+
+  /* force = true for event-driven redraws (resize, sliders while
+     stopped) so they never get skipped. */
+  function render(force = false){
     const layers = scanGlass();
-    syncBlurLayer(layers.ui);
     state.dive = Dive.value;
     const dpr = window.devicePixelRatio || 1;
+
+    const sig = frameSignature(layers, dpr);
+    if (!force && sameSignature(sig, lastSig)) return;
+    lastSig = sig;
+
+    syncBlurLayer(layers.ui);
     base.draw(state, layers.base, Math.min(dpr, 1.5) * scale);
     ui.draw(state, layers.ui, Math.min(dpr, 2)); 
   }
 
   function frame(now){
     rafId = 0;
+
+    /* Frame-rate cap: on high-refresh displays, skip vsyncs until a
+       full frame interval has passed since the last drawn frame. */
+    if (now - last < FRAME_MS - FRAME_SLACK_MS){
+      if (running) rafId = requestAnimationFrame(frame);
+      return;
+    }
 
     const dt = Math.min((now - last) / 1000, 0.05);
     last = now;
@@ -111,25 +183,29 @@ export function initOcean(){
     if (dt > 0.032){ slow++; } else { slow = Math.max(0, slow - 1); }
     if (slow > 45 && !downshifted){ downshifted = true; scale = 0.5; }
 
-    state.mouseX += (target.x - state.mouseX) * 0.045;
-    state.mouseY += (target.y - state.mouseY) * 0.045;
-    state.cursorX += (target.cx - state.cursorX) * 0.18;
-    state.cursorY += (target.cy - state.cursorY) * 0.18;
-    state.cursorOn += (target.on - state.cursorOn) * 0.08;
+    /* Frame-rate independent easing, calibrated so each factor behaves
+       exactly as the old per-frame value did at 60 fps. */
+    const ease = (k) => 1 - Math.pow(1 - k, dt * 60);
+
+    state.mouseX += (target.x - state.mouseX) * ease(0.045);
+    state.mouseY += (target.y - state.mouseY) * ease(0.045);
+    state.cursorX += (target.cx - state.cursorX) * ease(0.18);
+    state.cursorY += (target.cy - state.cursorY) * ease(0.18);
+    state.cursorOn += (target.on - state.cursorOn) * ease(0.08);
 
     const sTarget = Math.min(window.scrollY / Math.max(window.innerHeight, 1), 1.5);
-    state.scroll += (sTarget - state.scroll) * 0.08;
-    state.shallow += (shallowTarget - state.shallow) * 0.04;
+    state.scroll += (sTarget - state.scroll) * ease(0.08);
+    state.shallow += (shallowTarget - state.shallow) * ease(0.04);
 
     updateCSSColors(state.sunDir[1]);
-    render();
+    render(false);
     if (running) rafId = requestAnimationFrame(frame);
   }
 
   function startLoop(){
     running = true;
     if (rafId !== 0) return;          // a frame is already queued
-    last = performance.now();
+    last = performance.now() - FRAME_MS; // let the first frame draw immediately
     rafId = requestAnimationFrame(frame);
   }
 
@@ -151,11 +227,11 @@ export function initOcean(){
   state.moonDir = initAstro.moon;
   
   updateCSSColors(state.sunDir[1]);
-  render();
+  render(true);
   
-  window.addEventListener('resize', () => { if (!running) render(); });
-  window.addEventListener('scroll', () => { if (!running){ syncScroll(); render(); } }, { passive: true });
-  Dive.onUpdate(() => { if (!running){ syncScroll(); render(); } });
+  window.addEventListener('resize', () => { if (!running) render(true); });
+  window.addEventListener('scroll', () => { if (!running){ syncScroll(); render(true); } }, { passive: true });
+  Dive.onUpdate(() => { if (!running){ syncScroll(); render(true); } });
 
   window.addEventListener('pointermove', (e) => {
     target.x = (e.clientX / window.innerWidth) * 2 - 1;
@@ -195,7 +271,7 @@ export function initOcean(){
         state.sunDir = astro.sun;
         state.moonDir = astro.moon;
         updateCSSColors(state.sunDir[1]);
-        render();
+        render(true);
       }
     });
   }
@@ -203,7 +279,7 @@ export function initOcean(){
   if (ctrlChop){
     ctrlChop.addEventListener('input', (e) => {
       state.chop = parseFloat(e.target.value) / 100;
-      if (!running || paused) render();
+      if (!running || paused) render(true);
     });
   }
 
@@ -212,7 +288,7 @@ export function initOcean(){
       shallowTarget = parseFloat(e.target.value) / 100;
       if (!running || paused){
         state.shallow = shallowTarget;
-        render();
+        render(true);
       }
     });
   }

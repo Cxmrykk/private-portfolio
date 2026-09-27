@@ -128,7 +128,11 @@ void main(){
   vec3  sunCol = mix(primaryCol, vec3(0.72, 0.95, 1.00) * envLightI, diveFade);
   vec3  hiCol  = mix(sunCol, vec3(1.0), 0.7);
 
-  float dapple = getCaustics(fc * texel * vec2(uRes.x / uRes.y, 1.0) * 4.5 + vec2(0.0, uScroll * 0.4));
+  /* Underwater dapple. Every use below is scaled by diveFade, so above
+     the surface the caustic field has no effect; skip evaluating it. */
+  float dapple = (diveFade > 0.0)
+    ? getCaustics(fc * texel * vec2(uRes.x / uRes.y, 1.0) * 4.5 + vec2(0.0, uScroll * 0.4))
+    : 0.0;
   float lightI = mix(1.0, 0.82 + 0.50 * dapple, diveFade) * envLightI;
   
   vec3  Ls     = normalize(vec3(sunPx - fc, 900.0 * uPx));

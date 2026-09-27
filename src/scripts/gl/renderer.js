@@ -2,6 +2,9 @@
    RENDERER — one WebGL2 context, two passes
    Pass 1: ocean → framebuffer texture (+ mipmaps for frost)
    Pass 2: glass composite → canvas, sampling that texture
+   On the UI canvas both passes are scissored to the panels
+   (plus their shadow / refraction margin); everything outside
+   is transparent, so no fragments are spent there.
    ============================================================ */
 import { FULLSCREEN_VERT } from './shaders/common.glsl.js';
 import { OCEAN_FRAG } from './shaders/ocean.glsl.js';
@@ -9,7 +12,8 @@ import { GLASS_FRAG } from './shaders/glass.glsl.js';
 
 export const MAX_GLASS = 60;
 
-/* CSS px of ocean rendered around each UI panel (covers shadow + refraction reach) */
+/* CSS px of ocean rendered around each UI panel (covers shadow + refraction reach).
+   Must stay >= the glass shader's UI-layer discard margin (28 px). */
 const SCISSOR_MARGIN = 28;
 
 /* Three vec4 arrays of MAX_GLASS (rects, params, tints) plus the
@@ -155,6 +159,20 @@ export function createRenderer(canvasId, { isUI }){
     return count;
   }
 
+  /* Full-screen triangle; on the UI canvas, only inside the panel scissors */
+  function drawFullscreen(){
+    if (isUI){
+      gl.enable(gl.SCISSOR_TEST);
+      for (const s of scissors){
+        gl.scissor(s[0], s[1], s[2], s[3]);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      gl.disable(gl.SCISSOR_TEST);
+    } else {
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+  }
+
   /* state: { clock, dayTime, sunDir, moonDir, mouseX, mouseY, cursorX, cursorY, cursorOn, scroll, chop, shallow, dive } */
   function draw(state, items, dpr){
     const w = Math.max(1, Math.round(window.innerWidth * dpr));
@@ -181,15 +199,8 @@ export function createRenderer(canvasId, { isUI }){
     if (isUI){
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.enable(gl.SCISSOR_TEST);
-      for (const s of scissors){
-        gl.scissor(s[0], s[1], s[2], s[3]);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
-      }
-      gl.disable(gl.SCISSOR_TEST);
-    } else {
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
+    drawFullscreen();
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -221,7 +232,11 @@ export function createRenderer(canvasId, { isUI }){
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform1i(glass.u.uOcean, 0);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    /* UI layer: the shader discards everything farther than 28 px from a
+       panel, so scissoring to the same margin gives identical output
+       without running the fragment shader over the rest of the screen. */
+    drawFullscreen();
   }
 
   return { canvas, draw };
