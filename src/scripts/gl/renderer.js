@@ -13,6 +13,8 @@
      samples a blurred level (gel buttons, dyed panels, or the base
      layer's screen-space reflection). Otherwise the texture uses
      plain LINEAR filtering and the mip chain is skipped entirely.
+   - Bubble positions arrive precomputed in state.bubbles (see
+     bubble-field.js), shared by both canvases.
    ============================================================ */
 import { FULLSCREEN_VERT } from './shaders/common.glsl.js';
 import { OCEAN_FRAG } from './shaders/ocean.glsl.js';
@@ -33,7 +35,7 @@ const BASE_MAX_PIXELS = 1920 * 1080;
    scalar uniforms. WebGL2 only guarantees 224 fragment vectors. */
 const GLASS_UNIFORM_VECTORS = MAX_GLASS * 3 + 16;
 
-const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow', 'uDive', 'uSunDir', 'uMoonDir', 'uRandoms'];
+const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow', 'uDive', 'uSunDir', 'uMoonDir', 'uBubbles'];
 /* uShallow: the glass pass rebuilds the ocean camera (shared GLSL) so its
    glints can use real view rays, camera depth and beam positions. */
 const GLASS_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uCursor', 'uPx', 'uScroll', 'uDive', 'uShallow',
@@ -118,12 +120,6 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   const paramsData = new Float32Array(MAX_GLASS * 4);
   const tintsData  = new Float32Array(MAX_GLASS * 4); // dye r, g, b, strength
   const scissors = [];
-
-  /* Pre-calculate 64 random vec4s for the ocean pass's bubble field */
-  const randoms = new Float32Array(64 * 4);
-  for (let i = 0; i < 256; i++) {
-    randoms[i] = Math.random();
-  }
 
   /* Drawing-buffer size for a requested DPR, shrunk uniformly if it
      would exceed this canvas's pixel budget. */
@@ -229,7 +225,9 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     }
   }
 
-  /* state: { clock, dayTime, sunDir, moonDir, mouseX, mouseY, cursorX, cursorY, cursorOn, scroll, chop, shallow, dive } */
+  /* state: { clock, dayTime, sunDir, moonDir, mouseX, mouseY, cursorX, cursorY, cursorOn,
+              scroll, chop, shallow, dive, bubbles }
+     bubbles: Float32Array(BUBBLE_COUNT * 4), camera-relative xyz + radius */
   function draw(state, items, dpr){
     const [w, h] = bufferSize(dpr);
     resize(w, h);
@@ -249,7 +247,7 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     gl.uniform1f(ocean.u.uChop, state.chop);
     gl.uniform1f(ocean.u.uShallow, state.shallow);
     gl.uniform1f(ocean.u.uDive, state.dive);
-    gl.uniform4fv(ocean.u.uRandoms, randoms);
+    gl.uniform4fv(ocean.u.uBubbles, state.bubbles);
 
     if (isUI){
       gl.clearColor(0, 0, 0, 0);

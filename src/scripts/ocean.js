@@ -1,6 +1,7 @@
 import { Dive } from './dive.js';
 import { createRenderer } from './gl/renderer.js';
 import { scanGlass, syncBlurLayer } from './gl/glass-scan.js';
+import { createBubbleBuffer, updateBubbles } from './gl/bubble-field.js';
 import { getAstronomy } from './astronomy.js';
 
 /* ============================================================
@@ -15,6 +16,9 @@ import { getAstronomy } from './astronomy.js';
    - A frame is only drawn when its inputs changed (clock, sliders,
      dive, scroll, pointer, glass layout). While paused and settled
      the GPU does no work at all.
+   - Bubble positions depend only on time and the camera, so they
+     are computed here once per drawn frame (bubble-field.js) and
+     shared by both canvases, instead of per pixel in the shader.
    ============================================================ */
 
 const TARGET_FPS = 60;
@@ -51,7 +55,8 @@ export function initOcean(){
     mouseX: 0, mouseY: 0,            // parallax, normalised -1..1
     cursorX: -1e4, cursorY: -1e4,    // pointer light, CSS px
     cursorOn: 0,
-    scroll: 0, chop: 1.0, shallow: 0.0, dive: 0
+    scroll: 0, chop: 1.0, shallow: 0.0, dive: 0,
+    bubbles: createBubbleBuffer()    // camera-relative xyz + radius, per bubble
   };
   
   const target = { x: 0, y: 0, cx: -1e4, cy: -1e4, on: 0 };
@@ -108,7 +113,9 @@ export function initOcean(){
   }
 
   /* Everything that can change what either canvas shows. If none of it
-     moved since the last drawn frame, the new frame would be identical. */
+     moved since the last drawn frame, the new frame would be identical.
+     (Bubbles depend only on clock, dive, shallow and mouse, which are
+     all already in here.) */
   function frameSignature(layers, dpr){
     const sig = [
       state.clock, state.dayTime,
@@ -145,6 +152,10 @@ export function initOcean(){
     const sig = frameSignature(layers, dpr);
     if (!force && sameSignature(sig, lastSig)) return;
     lastSig = sig;
+
+    /* After state.dive is current: the bubble field uses the same
+       camera the shaders build from these uniforms. */
+    updateBubbles(state, state.bubbles);
 
     syncBlurLayer(layers.ui);
     base.draw(state, layers.base, Math.min(dpr, 1.5) * scale);

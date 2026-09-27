@@ -1,6 +1,10 @@
 /* ============================================================
    DIVE CONTROLLER — maps scroll position to camera depth
+   The depth curve itself lives in gl/camera.js, shared with the
+   CPU-side bubble field and mirrored by camHeight() in GLSL.
    ============================================================ */
+import { diveHeight } from './gl/camera.js';
+
 export const Dive = (function () {
   const splash  = document.getElementById('splash');
   const body    = document.body;
@@ -13,24 +17,16 @@ export const Dive = (function () {
   let target = 0, current = 0, camY = 3.3, raf = null, under = false;
   const listeners = [];
 
-  /* dynamically calculate seabed based on UI slider */
-  function getBedY() {
-    const shallow = shallowSlider ? parseFloat(shallowSlider.value) / 100 : 0;
-    return -27.0 * (1 - shallow) + -12.0 * shallow;
+  /* Reef proximity straight from the UI slider (0..1) */
+  function getShallow() {
+    return shallowSlider ? parseFloat(shallowSlider.value) / 100 : 0;
   }
 
-  /* piecewise depth mapping:
+  /* piecewise depth mapping (see diveHeight in gl/camera.js):
      Phase 1 (0.0 - 0.3): scroll to #projects, dive from 3.3 to -4.0 (a satisfying initial plunge)
-     Phase 2 (0.3 - 1.0): scroll to bottom, dive from -4.0 to a safe margin above floor */
+     Phase 2 (0.3 - 1.0): scroll to bottom, dive from -4.0 to 1.5 units above the seabed */
   function camFromDive(d) {
-    if (d < 0.3) {
-      const t = d / 0.3;
-      return 3.3 - 7.3 * t * t;
-    } else {
-      const t = (d - 0.3) / 0.7;
-      const floorY = getBedY() + 1.5; // stop 1.5 units above the actual seabed
-      return -4.0 + (floorY - (-4.0)) * t;
-    }
+    return diveHeight(d, getShallow());
   }
 
   function apply() {

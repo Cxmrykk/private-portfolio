@@ -6,11 +6,16 @@
    they sit behind the glass rather than over it.
    The camera, water absorption and shaft colour come from
    GLSL_COMMON so the glass pass lights itself from the same model.
+   Bubble positions are computed per frame on the CPU
+   (gl/bubble-field.js); only the ray–sphere test runs here.
    ============================================================ */
 import { GLSL_COMMON } from './common.glsl.js';
+import { BUBBLE_COUNT } from '../bubble-field.js';
 
 export const OCEAN_FRAG = `#version 300 es
 precision highp float;
+
+#define BUBBLE_COUNT ${BUBBLE_COUNT}
 
 uniform vec2  uRes;
 uniform float uTime;
@@ -19,7 +24,7 @@ uniform float uScroll;
 uniform float uChop;
 uniform float uShallow;
 uniform float uDive;
-uniform vec4  uRandoms[64]; // Pre-calculated randomness offloaded from CPU
+uniform vec4  uBubbles[BUBBLE_COUNT]; // xyz = position relative to the camera (pre-wrapped), w = radius
 
 out vec4 fragColor;
 
@@ -319,8 +324,12 @@ vec3 renderUnder(vec3 ro, vec3 rd){
   return col;
 }
 
-/* ---------- True 3D Physical Bubbles (Frutiger Aero Physics) ---------- */
-vec3 addBubbles(vec3 col, vec3 ro, vec3 rd, float amount){
+/* ---------- True 3D Physical Bubbles (Frutiger Aero Physics) ----------
+   Positions (buoyancy, helical wobble, wrap around the camera) are
+   computed once per frame on the CPU; see gl/bubble-field.js.
+   uBubbles[i].xyz is the bubble relative to the camera, so it is
+   directly the camera-to-bubble vector. */
+vec3 addBubbles(vec3 col, vec3 rd, float amount){
   if (amount <= 0.001) return col;
   
   float dayW, sunsetW, nightW;
@@ -335,34 +344,11 @@ vec3 addBubbles(vec3 col, vec3 ro, vec3 rd, float amount){
   vec3 finalCol = col;
   float focalZ = 2.5; // Focal plane distance for Depth of Field
   
-  for (int i = 0; i < 40; i++){
-    vec4 rnd = uRandoms[i];
-    float h1 = rnd.x;
-    float h2 = rnd.y;
-    float h3 = rnd.z;
-    float h4 = rnd.w;
+  for (int i = 0; i < BUBBLE_COUNT; i++){
+    vec4 b = uBubbles[i];
+    vec3 V = b.xyz;          // Vector from camera to bubble
+    float radius = b.w;
     
-    // Physics: Buoyancy speed depends heavily on bubble radius
-    float radius = mix(0.015, 0.08, h2 * h2);
-    float speed = 0.8 + radius * 15.0;
-    
-    // Helical wobble (fluid dynamics)
-    float cyc = uTime * 1.5 + h1 * 20.0;
-    float wobbleX = sin(cyc) * radius * 1.2;
-    float wobbleZ = cos(cyc) * radius * 1.2;
-    
-    // Virtual world position
-    vec3 p;
-    p.x = (h3 - 0.5) * 8.0 + wobbleX;
-    p.z = (h4 - 0.5) * 8.0 + wobbleZ;
-    p.y = uTime * speed + h1 * 50.0;
-    
-    // Wrap space around camera to create an infinite field
-    vec3 localP = mod(p - ro + 4.0, 8.0) - 4.0;
-    vec3 bPos = ro + localP;
-    
-    // Vector from camera to bubble
-    vec3 V = bPos - ro;
     float Z = dot(V, rd); // Depth along view ray
     
     // Frustum cull (skip if behind camera or too far away)
@@ -414,7 +400,7 @@ vec3 addBubbles(vec3 col, vec3 ro, vec3 rd, float amount){
         vec3 bubbleCol = refrCol + edgeCol + (softbox + innerGlow) * hiCol + (specMain + flare) * hiCol;
         
         // Fade out smoothly at the cell's vertical boundaries to prevent grid popping
-        float life = smoothstep(-4.0, -3.0, localP.y) * smoothstep(4.0, 3.0, localP.y);
+        float life = smoothstep(-4.0, -3.0, V.y) * smoothstep(4.0, 3.0, V.y);
         
         // Fade out at far distances
         float fade = smoothstep(8.0, 5.0, Z) * amount * life;
@@ -455,7 +441,7 @@ void main(){
   col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, mix(1.12, 1.04, sub));
   col *= 1.0 - 0.45 * sub * smoothstep(0.55, 1.85, length(uv));
 
-  col = addBubbles(col, ro, rd, smoothstep(0.10, 0.32, d));
+  col = addBubbles(col, rd, smoothstep(0.10, 0.32, d));
 
   fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
