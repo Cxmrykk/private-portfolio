@@ -13,6 +13,11 @@ const NO_TINT = Object.freeze([0, 0, 0, 0]);
    handful of distinct values, so this avoids re-parsing per frame. */
 const tintCache = new Map();
 
+/* Last geometry written to each blur box, so unchanged boxes are not
+   re-styled every frame (each write invalidates style and forces the
+   backdrop-filter layer to be recomposited). */
+const blurKeys = new WeakMap();
+
 function clamp01(v){ return Math.min(1, Math.max(0, v)); }
 
 function readTint(style){
@@ -80,13 +85,19 @@ export function syncBlurLayer(uiItems){
     const box = layer.children[i];
     if (i < uiItems.length){
       const { rect, style } = uiItems[i];
+      const radius = style.borderRadius;
+      const key = rect.left + ',' + rect.top + ',' + rect.width + ',' + rect.height + ',' + radius;
+      if (blurKeys.get(box) === key) continue;
+      blurKeys.set(box, key);
+
       box.style.display = 'block';
       box.style.left = rect.left + 'px';
       box.style.top = rect.top + 'px';
       box.style.width = rect.width + 'px';
       box.style.height = rect.height + 'px';
-      box.style.borderRadius = style.borderRadius;
-    } else {
+      box.style.borderRadius = radius;
+    } else if (blurKeys.get(box) !== 'hidden'){
+      blurKeys.set(box, 'hidden');
       box.style.display = 'none';
     }
   }

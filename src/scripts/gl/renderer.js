@@ -5,6 +5,14 @@
    On the UI canvas both passes are scissored to the panels
    (plus their shadow / refraction margin); everything outside
    is transparent, so no fragments are spent there.
+
+   GPU budget:
+   - The base canvas is capped to a pixel budget (BASE_MAX_PIXELS)
+     so very large / high-DPI screens don't render 4+ MP per pass.
+   - Mipmaps are only rebuilt when a panel on this canvas actually
+     samples a blurred level (gel buttons, dyed panels, or the base
+     layer's screen-space reflection). Otherwise the texture uses
+     plain LINEAR filtering and the mip chain is skipped entirely.
    ============================================================ */
 import { FULLSCREEN_VERT } from './shaders/common.glsl.js';
 import { OCEAN_FRAG } from './shaders/ocean.glsl.js';
@@ -15,6 +23,11 @@ export const MAX_GLASS = 60;
 /* CSS px of ocean rendered around each UI panel (covers shadow + refraction reach).
    Must stay >= the glass shader's UI-layer discard margin (28 px). */
 const SCISSOR_MARGIN = 28;
+
+/* Largest drawing buffer (in device pixels) for the full-screen base
+   canvas. 1080p-class displays already render below this, so it only
+   kicks in on large / high-DPI screens. */
+const BASE_MAX_PIXELS = 1920 * 1080;
 
 /* Three vec4 arrays of MAX_GLASS (rects, params, tints) plus the
    scalar uniforms. WebGL2 only guarantees 224 fragment vectors. */
@@ -61,7 +74,7 @@ function glassType(el){
   return 0;
 }
 
-export function createRenderer(canvasId, { isUI }){
+export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : BASE_MAX_PIXELS }){
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
 
@@ -90,11 +103,16 @@ export function createRenderer(canvasId, { isUI }){
   /* ---- ocean render target ---- */
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   const fbo = gl.createFramebuffer();
+
+  /* Tracks the current min filter so it is only changed when needed.
+     Without a mip chain the texture must use LINEAR, or it would be
+     incomplete and sample as black. */
+  let mipFiltering = false;
 
   const rectsData  = new Float32Array(MAX_GLASS * 4);
   const paramsData = new Float32Array(MAX_GLASS * 4);
@@ -107,6 +125,19 @@ export function createRenderer(canvasId, { isUI }){
     randoms[i] = Math.random();
   }
 
+  /* Drawing-buffer size for a requested DPR, shrunk uniformly if it
+     would exceed this canvas's pixel budget. */
+  function bufferSize(dpr){
+    let w = window.innerWidth * dpr;
+    let h = window.innerHeight * dpr;
+    const px = w * h;
+    if (px > maxPixels){
+      const k = Math.sqrt(maxPixels / px);
+      w *= k; h *= k;
+    }
+    return [Math.max(1, Math.round(w)), Math.max(1, Math.round(h))];
+  }
+
   function resize(w, h){
     if (canvas.width === w && canvas.height === h) return;
     canvas.width = w; canvas.height = h;
@@ -117,13 +148,22 @@ export function createRenderer(canvasId, { isUI }){
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
+  /* Packs visible panels into the uniform arrays.
+     Returns { count, needsMips }: needsMips is true when any packed
+     panel samples a blurred mip level (see glass.glsl.js material()
+     and tintFrostLod()). */
   function pack(items, h, sx, sy){
     let count = 0;
+    let needsMips = !isUI; // base layer's screen-space reflection reads LOD 1.5
     scissors.length = 0;
     for (const it of items){
       if (count >= MAX_GLASS) break;
       const { el, style, rect, op, tint } = it;
       if (rect.bottom < -150 || rect.top > window.innerHeight + 150) continue;
+
+      const type = glassType(el);
+      const tk = tint ? tint[3] : 0;
+      if (type === 1 || tk > 0) needsMips = true;
 
       const i = count * 4;
       rectsData[i]     = rect.left * sx;
@@ -136,14 +176,14 @@ export function createRenderer(canvasId, { isUI }){
         br = Math.min(rect.width, rect.height) / 2;
       }
       paramsData[i]     = br * sx;
-      paramsData[i + 1] = glassType(el);
+      paramsData[i + 1] = type;
       paramsData[i + 2] = 0; // padding, previously hover
       paramsData[i + 3] = op;
 
       tintsData[i]     = tint ? tint[0] : 0;
       tintsData[i + 1] = tint ? tint[1] : 0;
       tintsData[i + 2] = tint ? tint[2] : 0;
-      tintsData[i + 3] = tint ? tint[3] : 0;
+      tintsData[i + 3] = tk;
 
       if (isUI){
         const m = SCISSOR_MARGIN * sx;
@@ -156,7 +196,7 @@ export function createRenderer(canvasId, { isUI }){
       }
       count++;
     }
-    return count;
+    return { count, needsMips };
   }
 
   /* Full-screen triangle; on the UI canvas, only inside the panel scissors */
@@ -173,13 +213,28 @@ export function createRenderer(canvasId, { isUI }){
     }
   }
 
+  /* Builds the mip chain only when something will sample it; otherwise
+     drops to LINEAR so the texture stays complete without one. */
+  function prepareOceanTexture(needsMips){
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    if (needsMips){
+      if (!mipFiltering){
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        mipFiltering = true;
+      }
+      gl.generateMipmap(gl.TEXTURE_2D);
+    } else if (mipFiltering){
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      mipFiltering = false;
+    }
+  }
+
   /* state: { clock, dayTime, sunDir, moonDir, mouseX, mouseY, cursorX, cursorY, cursorOn, scroll, chop, shallow, dive } */
   function draw(state, items, dpr){
-    const w = Math.max(1, Math.round(window.innerWidth * dpr));
-    const h = Math.max(1, Math.round(window.innerHeight * dpr));
+    const [w, h] = bufferSize(dpr);
     resize(w, h);
     const sx = w / window.innerWidth, sy = h / window.innerHeight;
-    const count = pack(items, h, sx, sy);
+    const { count, needsMips } = pack(items, h, sx, sy);
 
     /* ---- pass 1: ocean into the texture ---- */
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
@@ -203,8 +258,7 @@ export function createRenderer(canvasId, { isUI }){
     drawFullscreen();
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.generateMipmap(gl.TEXTURE_2D);
+    prepareOceanTexture(needsMips);
 
     /* ---- pass 2: glass over the texture, onto the canvas ---- */
     gl.viewport(0, 0, w, h);
