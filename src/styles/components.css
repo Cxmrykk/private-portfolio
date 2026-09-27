@@ -107,30 +107,40 @@ body.is-underwater .glass{
 }
 
 /* ---------- water controls (expandable sliders) ---------- */
-/* One shared width for the whole group: the panel and its toggle
-   button both stretch to it, so the menu opens flush above the
-   button with matching left and right edges. */
+/* The group is a fixed 220px column anchored bottom-right. The
+   panel spans the full width; the Settings pill is compact and
+   sits in the bottom-right corner beneath it.
+   The group itself ignores the pointer so its empty area (left of
+   the pill, and the hidden panel's footprint) can't open the menu;
+   only the pill and the open panel take hover. */
 .sea-controls{
   --sea-controls-w:220px;
   position:fixed; right:16px; bottom:16px; z-index:30;
   width:min(var(--sea-controls-w), calc(100vw - 32px));
-  display:flex; flex-direction:column; align-items:stretch; gap:10px;
+  display:flex; flex-direction:column; align-items:flex-end; gap:10px;
+  pointer-events:none;
 }
 
 /* Settings toggle: a real button so tap/keyboard focus opens the panel
-   via :focus-within. 44px tall to meet touch-target guidance; the glass
-   pass draws the pill from its box and border-radius. */
+   via :focus-within. Visually compact (32px); the ::after extends the
+   hit area to 44px for touch without changing the rect the glass pass
+   draws from. */
 .sea-status{
-  display:flex; align-items:center; justify-content:center;
-  width:100%; min-height:44px;
-  padding:12px 26px; margin:0;
+  display:inline-flex; align-items:center; justify-content:center;
+  width:auto; min-height:32px;
+  padding:8px 16px; margin:0;
   border-radius:999px;
   font:inherit; color:inherit;
   cursor:pointer;
+  pointer-events:auto;
   -webkit-appearance:none; appearance:none;
 }
+.sea-status::after{
+  content:""; position:absolute; inset:-6px -4px;
+  border-radius:inherit;
+}
 .settings-hint{
-  font:600 14.5px/1 "Segoe UI",Tahoma,sans-serif; letter-spacing:.01em;
+  font:600 13px/1 "Segoe UI",Tahoma,sans-serif; letter-spacing:.01em;
   color:#e8f8ff; text-shadow:0 1px 3px rgba(0,0,0,0.7);
 }
 
@@ -141,6 +151,11 @@ body.is-underwater .glass{
   opacity:0; visibility:hidden; transform:translateY(10px);
   transition:opacity .3s ease, transform .3s ease, visibility 0s .3s;
   pointer-events:none;
+}
+/* Bridges the 10px gap down to the pill so moving the pointer from
+   the pill into the open panel doesn't drop the hover. */
+.sea-panel::after{
+  content:""; position:absolute; left:0; right:0; top:100%; height:10px;
 }
 /* Trigger panel on hover or inner focus (for keyboard nav) */
 .sea-controls:hover .sea-panel,

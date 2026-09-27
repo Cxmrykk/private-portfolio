@@ -3,7 +3,17 @@
    Fetches project metadata and injects them into the DOM as 
    glass cards. The ocean/glass WebGL pipeline automatically 
    picks them up on the next render frame.
+   Each card carries a Funky Seasons class (see seasons.css),
+   which the glass pass reads back as its dye colour.
    ============================================================ */
+
+const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
+
+/* Explicit "season" in the JSON wins; otherwise cycle by position
+   so newly added projects still get a colour. */
+function seasonFor(proj, index) {
+  return SEASONS.includes(proj.season) ? proj.season : SEASONS[index % SEASONS.length];
+}
 
 export async function initProjects() {
   const container = document.getElementById('projects-container');
@@ -26,10 +36,13 @@ export async function initProjects() {
     container.innerHTML = '';
     
     // Construct and inject each project card
-    projects.forEach(proj => {
-      // Changed to an anchor tag to act as a hyperlink
+    projects.forEach((proj, index) => {
+      const season = seasonFor(proj, index);
+
+      // Anchor tag so the whole card acts as a hyperlink
       const article = document.createElement('a');
-      article.className = 'card glass';
+      article.className = `card glass season-${season}`;
+      article.dataset.season = season;
       article.href = proj.link || '#';
       article.target = '_blank';
       article.rel = 'noopener noreferrer';
@@ -43,7 +56,7 @@ export async function initProjects() {
       const chipsDiv = document.createElement('div');
       chipsDiv.className = 'chips';
       
-      proj.tags.forEach(tag => {
+      (proj.tags || []).forEach(tag => {
         const b = document.createElement('b');
         b.textContent = tag;
         chipsDiv.appendChild(b);

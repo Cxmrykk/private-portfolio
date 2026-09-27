@@ -5,9 +5,11 @@
    (ocean + low-z glass); 1 writes the transparent UI canvas
    (premultiplied alpha) that sits above the DOM.
    Physical sun / moon / shaft glints live in glint.glsl.js.
+   Per-panel dye (Funky Seasons) lives in tint.glsl.js.
    ============================================================ */
 import { GLSL_COMMON } from './common.glsl.js';
 import { GLSL_GLINT } from './glint.glsl.js';
+import { GLSL_TINT } from './tint.glsl.js';
 
 export const GLASS_FRAG = `#version 300 es
 precision highp float;
@@ -28,11 +30,13 @@ uniform sampler2D uOcean;
 uniform int  uGlassCount;
 uniform vec4 uGlassRects[MAX_GLASS];  // x, y, w, h  (canvas px, y up)
 uniform vec4 uGlassParams[MAX_GLASS]; // radius, type, padding, opacity
+uniform vec4 uGlassTints[MAX_GLASS];  // dye r, g, b (0..1), strength (0 = clear)
 
 out vec4 fragColor;
 
 ${GLSL_COMMON}
 ${GLSL_GLINT}
+${GLSL_TINT}
 
 /* rounded-rect signed distance with outward gradient */
 float sdRect(vec2 p, vec2 hs, float r, out vec2 grad){
@@ -161,6 +165,8 @@ void main(){
     float r     = uGlassParams[i].x;
     float type  = uGlassParams[i].y;
     float op    = uGlassParams[i].w;
+    vec3  dye   = uGlassTints[i].rgb;
+    float tk    = uGlassTints[i].a;
 
     vec2 hs = rect.zw * 0.5;
     vec2 center = rect.xy + hs;
@@ -187,8 +193,8 @@ void main(){
       float shadow = (1.0 - smoothstep(-1.0, shadowReach, dS)) * shadowW * outsideW;
       float focus  = exp(-pow((dS - 5.0 * uPx) / (4.0 * uPx), 2.0))
                    * clamp(dot(gS, -L2), 0.0, 1.0) * shadowW * 0.9 * outsideW * lI;
-      col *= 1.0 - shadow;
-      col += sunCol * focus;
+      col *= tintShadow(shadow, dye, tk);
+      col += sunCol * focus * tintSpill(dye, tk);
       if (uLayerRender == 1) alpha = shadow + alpha * (1.0 - shadow);
     }
 
@@ -210,7 +216,7 @@ void main(){
     float disp  = 0.05 * s * (0.4 + 0.6 * facing);             
     vec2  base  = (center + p * 0.96) * texel;                  
     vec2  refr  = -grad * shift * texel;
-    float lod   = frostLod * face;
+    float lod   = tintFrostLod(frostLod, tk) * face;
 
     vec3 rimS = vec3(textureLod(uOcean, base + refr * (1.0 - disp), lod).r,
                      textureLod(uOcean, base + refr,                lod).g,
@@ -224,6 +230,9 @@ void main(){
 
     body = mix(body, (body - 0.5) * 1.08 + 0.5, face * (1.0 - tintW));
     body *= pow(vec3(0.975, 1.0, 1.0), vec3(3.0 * s * s));
+
+    /* dyed glass: colourised face, in-scatter glow, absorbing bevels */
+    body = tintBody(body, dye, tk, face, s, sT, lI);
 
     vec3  Nf    = normalize(vec3(pn * 0.10, 1.0));
     float sheen = pow(clamp(dot(Nf, Hsun), 0.0, 1.0), 6.0) * 0.16 * lI * (0.4 + 0.6 * sunNear) * face;
@@ -242,7 +251,7 @@ void main(){
     body = mix(body, env, fres);
 
     float rimGlow = smoothstep(0.62, 0.97, s);
-    vec3  rimC = mix(env, hiCol, 0.45 * facing * (0.5 + 0.5 * lI));
+    vec3  rimC = tintRim(mix(env, hiCol, 0.45 * facing * (0.5 + 0.5 * lI)), dye, tk);
     body = mix(body, rimC, rimGlow * 0.60);
 
     float sil = exp(-pow((dist + 0.5 * uPx) / (0.8 * uPx), 2.0));
@@ -265,7 +274,7 @@ void main(){
       float tS   = clamp((dist + bev) / bev, 0.0, 1.0);
       float rate = max(6.0 * tS * (1.0 - tS) / (bev * cI), 0.01);
 
-      vec3 glassCol = (tintW > 0.0) ? tint : vec3(0.84, 0.95, 0.91); 
+      vec3 glassCol = tintGlassCol((tintW > 0.0) ? tint : vec3(0.84, 0.95, 0.91), dye, tk);
       vec3 g = glassGlint(rd, N, rate, glassCol) * smoothstep(0.30, 0.45, s);
 
       vec3 gD = pow(1.0 - exp(-g * glintExpo), vec3(0.86));

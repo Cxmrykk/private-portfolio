@@ -12,11 +12,16 @@ export const MAX_GLASS = 60;
 /* CSS px of ocean rendered around each UI panel (covers shadow + refraction reach) */
 const SCISSOR_MARGIN = 28;
 
+/* Three vec4 arrays of MAX_GLASS (rects, params, tints) plus the
+   scalar uniforms. WebGL2 only guarantees 224 fragment vectors. */
+const GLASS_UNIFORM_VECTORS = MAX_GLASS * 3 + 16;
+
 const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow', 'uDive', 'uSunDir', 'uMoonDir', 'uRandoms'];
 /* uShallow: the glass pass rebuilds the ocean camera (shared GLSL) so its
    glints can use real view rays, camera depth and beam positions. */
 const GLASS_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uCursor', 'uPx', 'uScroll', 'uDive', 'uShallow',
-                        'uLayerRender', 'uOcean', 'uGlassCount', 'uGlassRects', 'uGlassParams', 'uSunDir', 'uMoonDir'];
+                        'uLayerRender', 'uOcean', 'uGlassCount', 'uGlassRects', 'uGlassParams',
+                        'uGlassTints', 'uSunDir', 'uMoonDir'];
 
 function compile(gl, type, src){
   const sh = gl.createShader(type);
@@ -65,6 +70,12 @@ export function createRenderer(canvasId, { isUI }){
   });
   if (!gl) return null;
 
+  const maxFragVectors = gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS);
+  if (maxFragVectors < GLASS_UNIFORM_VECTORS){
+    console.warn(`Glass pass needs ~${GLASS_UNIFORM_VECTORS} fragment uniform vectors; ` +
+                 `this device offers ${maxFragVectors}. Lower MAX_GLASS if linking fails.`);
+  }
+
   const vs = compile(gl, gl.VERTEX_SHADER, FULLSCREEN_VERT);
   if (!vs) return null;
   const ocean = buildProgram(gl, vs, OCEAN_FRAG, OCEAN_UNIFORMS);
@@ -83,6 +94,7 @@ export function createRenderer(canvasId, { isUI }){
 
   const rectsData  = new Float32Array(MAX_GLASS * 4);
   const paramsData = new Float32Array(MAX_GLASS * 4);
+  const tintsData  = new Float32Array(MAX_GLASS * 4); // dye r, g, b, strength
   const scissors = [];
 
   /* Pre-calculate 64 random vec4s for the ocean pass's bubble field */
@@ -106,7 +118,7 @@ export function createRenderer(canvasId, { isUI }){
     scissors.length = 0;
     for (const it of items){
       if (count >= MAX_GLASS) break;
-      const { el, style, rect, op } = it;
+      const { el, style, rect, op, tint } = it;
       if (rect.bottom < -150 || rect.top > window.innerHeight + 150) continue;
 
       const i = count * 4;
@@ -123,6 +135,11 @@ export function createRenderer(canvasId, { isUI }){
       paramsData[i + 1] = glassType(el);
       paramsData[i + 2] = 0; // padding, previously hover
       paramsData[i + 3] = op;
+
+      tintsData[i]     = tint ? tint[0] : 0;
+      tintsData[i + 1] = tint ? tint[1] : 0;
+      tintsData[i + 2] = tint ? tint[2] : 0;
+      tintsData[i + 3] = tint ? tint[3] : 0;
 
       if (isUI){
         const m = SCISSOR_MARGIN * sx;
@@ -199,6 +216,7 @@ export function createRenderer(canvasId, { isUI }){
     gl.uniform1i(glass.u.uGlassCount, count);
     gl.uniform4fv(glass.u.uGlassRects, rectsData);
     gl.uniform4fv(glass.u.uGlassParams, paramsData);
+    gl.uniform4fv(glass.u.uGlassTints, tintsData);
     
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);

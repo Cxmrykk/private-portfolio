@@ -1,0 +1,53 @@
+/* ============================================================
+   FUNKY SEASONS — dyed glass
+   Spring pink · Summer green · Autumn orange · Winter blue.
+
+   --season / --season-strength inherit, so DOM accents inside a
+   card (chips) can use them.
+   --glass-tint / --glass-tint-strength do NOT inherit (registered
+   below), so a tint never leaks onto nested glass. glass-scan.js
+   reads these two and hands them to the WebGL glass pass.
+   ============================================================ */
+@property --glass-tint{
+  syntax:'*';
+  inherits:false;
+}
+@property --glass-tint-strength{
+  syntax:'<number>';
+  inherits:false;
+  initial-value:0;
+}
+
+/* Colours as bare "r, g, b" so they work in rgb()/rgba() and are
+   trivially parsed in JS. Winter is pushed toward periwinkle so it
+   stays distinct from the teal-blue ocean behind it. */
+.season-spring{ --season:255, 110, 190; --season-strength:0.90; }
+.season-summer{ --season:140, 222, 64;  --season-strength:0.85; }
+.season-autumn{ --season:255, 152, 38;  --season-strength:0.90; }
+.season-winter{ --season:132, 160, 255; --season-strength:1.00; }
+
+[class*="season-"]{
+  --glass-tint:var(--season);
+  --glass-tint-strength:var(--season-strength);
+}
+
+/* ---------- DOM accents printed onto the dyed card ---------- */
+.card[class*="season-"] .chips b{
+  color:#ffffff;
+  background:rgba(var(--season), 0.16);
+  border-color:rgba(var(--season), 0.55);
+}
+
+/* ---------- CSS fallback when WebGL2 is unavailable ----------
+   The glass pass normally draws every .glass surface; without it
+   they would be fully transparent, so give them a flat CSS slab. */
+body.no-webgl .glass{
+  background:linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.05)) !important;
+  border-color:rgba(255,255,255,.28) !important;
+  -webkit-backdrop-filter:blur(10px) !important;
+  backdrop-filter:blur(10px) !important;
+}
+body.no-webgl .glass[class*="season-"]{
+  background:linear-gradient(180deg, rgba(var(--season), .38), rgba(var(--season), .14)) !important;
+  border-color:rgba(var(--season), .60) !important;
+}

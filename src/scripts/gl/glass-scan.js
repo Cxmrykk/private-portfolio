@@ -2,8 +2,38 @@
    GLASS SCAN — which DOM elements are glass, on which layer
    Panels, cards and buttons are glass. Chips and result pills
    are printed flat onto their card (see components.css).
+   Each item also carries its dye (see seasons.css):
+   [r, g, b, strength] in 0..1, strength 0 = clear glass.
    ============================================================ */
 const SELECTOR = '.glass, .btn';
+
+const NO_TINT = Object.freeze([0, 0, 0, 0]);
+
+/* Parsed tints keyed by their raw CSS strings; there are only a
+   handful of distinct values, so this avoids re-parsing per frame. */
+const tintCache = new Map();
+
+function clamp01(v){ return Math.min(1, Math.max(0, v)); }
+
+function readTint(style){
+  const k = parseFloat(style.getPropertyValue('--glass-tint-strength'));
+  if (!(k > 0)) return NO_TINT;
+
+  const raw = style.getPropertyValue('--glass-tint').trim();
+  if (!raw) return NO_TINT;
+
+  const key = raw + '|' + k;
+  let tint = tintCache.get(key);
+  if (!tint){
+    const n = raw.split(/[\s,\/]+/).filter(Boolean).map(Number);
+    const ok = n.length >= 3 && n.slice(0, 3).every(Number.isFinite);
+    tint = ok
+      ? Object.freeze([clamp01(n[0] / 255), clamp01(n[1] / 255), clamp01(n[2] / 255), clamp01(k)])
+      : NO_TINT;
+    tintCache.set(key, tint);
+  }
+  return tint;
+}
 
 /* Elements at z >= 20 (header, water controls) sit above the page
    content and render on the transparent UI canvas; the rest render
@@ -23,7 +53,7 @@ export function scanGlass(){
     let z = parseInt(style.zIndex, 10);
     if (isNaN(z)) z = (el.closest('header') || el.closest('.sea-controls')) ? 100 : 1;
 
-    const item = { el, style, rect, z, op };
+    const item = { el, style, rect, z, op, tint: readTint(style) };
     (z >= 20 ? ui : base).push(item);
   });
 
