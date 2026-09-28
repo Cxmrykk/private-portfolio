@@ -17,10 +17,26 @@
   --panel-radius:20px;
   --shell:min(1120px, 92vw);
   --pad:clamp(20px, 3.4vw, 40px);
+
+  /* Fixed navbar: gap above it and the space it occupies */
+  --bar-gap:clamp(8px, 2vw, 14px);
+  --bar-height:60px;
+
+  /* Open water between sections: roughly one screen */
+  --section-gap:100vh;
+}
+@supports (height:100svh){
+  :root{ --section-gap:100svh; }
 }
 
 *{box-sizing:border-box}
-html{scroll-behavior:smooth}
+
+/* No CSS smooth scrolling: the section scroller (scripts/scroll/)
+   animates every scroll itself and needs instant writes. */
+html{
+  scroll-behavior:auto;
+  overscroll-behavior-y:none;
+}
 
 body{
   margin:0;
@@ -31,4 +47,3 @@ body{
   -webkit-font-smoothing:antialiased;
   overflow-x:hidden;
 }
-

@@ -33,7 +33,10 @@
 <main id="main">
   <div class="shell" id="top">
 
-    <section class="hero">
+    <!-- Every [data-stop] section is one scroll stop (see scripts/scroll/).
+         Stops are a viewport apart; scrolling inside a stop never
+         carries over into the next one. -->
+    <section class="hero" data-stop>
       <p class="eyebrow">Software Engineering (Honours) — Final Year</p>
       <h1>merrick.cam
         <em>Bringing concepts to life with innovative software — both as a hobby and in the professional industry.</em></h1>
@@ -44,7 +47,7 @@
       <a class="dive-hint" href="#projects"><span class="chev"></span>Scroll to dive</a>
     </section>
 
-    <section id="projects">
+    <section id="projects" data-stop>
       <div class="panel glass">
         <div class="section-head">
           <h2>Selected work</h2>
@@ -105,7 +108,7 @@
       </div>
     </section>
 
-    <section id="about">
+    <section id="about" data-stop>
       <div class="panel glass">
         <div class="section-head"><h2>About</h2></div>
         <div class="about">
@@ -124,7 +127,7 @@
       </div>
     </section>
 
-    <section id="contact">
+    <section id="contact" data-stop>
       <div class="contact glass">
         <h2>Contact Us</h2>
         <p>If you have any questions, queries or concerns - don't hesistate to reach me via email or LinkedIn. Feel free to use the buttons below:</p>

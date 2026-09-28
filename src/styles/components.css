@@ -117,6 +117,9 @@ body.is-underwater .glass{
    The group itself ignores the pointer so its empty area (left of
    the pill, and the hidden panel's footprint) can't open the menu;
    only the pill and the open panel take input.
+   touch-action:none: touches on the controls never pan the page
+   (the section scroller also leaves them alone), so slider drags
+   can't be mistaken for scrolling.
    Open state: .is-open from settings-toggle.js (tap, click, keyboard),
    plus plain hover for devices with a real pointer. */
 .sea-controls{
@@ -129,6 +132,7 @@ body.is-underwater .glass{
   width:min(var(--sea-controls-w), calc(100vw - 2 * var(--sea-controls-edge)));
   display:flex; flex-direction:column-reverse; align-items:flex-end; gap:10px;
   pointer-events:none;
+  touch-action:none;
 }
 
 /* Settings toggle: a real button with aria-expanded. Visually compact
@@ -193,7 +197,6 @@ body.is-underwater .glass{
   -webkit-appearance:none; appearance:none; width:100%; background:transparent; margin:0;
   /* taller hit box for fingers; the visible track stays 10px */
   min-height:28px;
-  touch-action:pan-y;
 }
 .sea-panel input[type="range"]:focus{outline:none;}
 .sea-panel input[type="range"]::-webkit-slider-runnable-track{
@@ -245,6 +248,9 @@ body.is-underwater .glass{
 a:focus-visible, button:focus-visible{
   outline:3px solid #ffe08a; outline-offset:3px; border-radius:999px;
 }
+/* Sections / main receive programmatic focus after an in-page link
+   (scroll/anchors.js); they are not controls, so no ring. */
+[tabindex="-1"]:focus{outline:none}
 .skip{
   position:absolute; left:-9999px; top:0; z-index:50;
   padding:12px 18px; background:rgba(0,0,0,0.8); color:#ffffff; border-radius:0 0 12px 0;
