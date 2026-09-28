@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>merrick.cam - Portfolio</title>
 <meta name="description" content="Software engineering portfolio: computer vision, embedded systems, web applications, and automation.">
 <link rel="stylesheet" href="./styles/style.css">
@@ -20,7 +20,7 @@
 <header class="bar">
   <div class="shell">
     <div class="bar-inner glass">
-      <a class="mark" href="#top">Cameron Merrick</a>
+      <a class="mark" href="#top">Cameron<span class="mark-long"> Merrick</span></a>
       <nav class="bar-nav">
         <a href="#projects">Projects</a>
         <a href="#about">About</a>
@@ -143,8 +143,14 @@
   <div class="shell">2026 — Cameron Merrick's Website — <a href="#top">Back to the surface</a></div>
 </footer>
 
+<!-- The toggle comes first in the DOM so Tab moves from "Settings"
+     straight into the sliders; CSS (column-reverse) draws the panel
+     above it. settings-toggle.js drives .is-open / aria-expanded. -->
 <div class="sea-controls" role="group" aria-label="Water controls">
-  <div class="sea-panel glass">
+  <button type="button" class="sea-status glass" aria-expanded="false" aria-controls="sea-panel">
+    <span class="settings-hint">Settings</span>
+  </button>
+  <div class="sea-panel glass" id="sea-panel">
     <label>
       <span>Time of Day</span>
       <input type="range" id="ctrl-time" min="0" max="2400" value="1200">
@@ -159,9 +165,6 @@
     </label>
     <button type="button" id="ctrl-play" class="panel-btn" aria-pressed="false">Pause Animation</button>
   </div>
-  <button type="button" class="sea-status glass" aria-haspopup="true">
-    <span class="settings-hint">Settings</span>
-  </button>
 </div>
 
 <script type="module" src="./scripts/main.js"></script>

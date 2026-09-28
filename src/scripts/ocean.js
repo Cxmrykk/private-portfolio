@@ -19,6 +19,10 @@ import { getAstronomy } from './astronomy.js';
    - Bubble positions depend only on time and the camera, so they
      are computed here once per drawn frame (bubble-field.js) and
      shared by both canvases, instead of per pixel in the shader.
+   - Touch devices (coarse pointer) start with a smaller base-canvas
+     budget and render scale. Phones have far weaker GPUs than their
+     pixel density suggests, and starting low avoids the ~45 slow
+     frames the downshift heuristic needs before it reacts.
    ============================================================ */
 
 const TARGET_FPS = 60;
@@ -29,9 +33,26 @@ const FRAME_SLACK_MS = 2;
 /* Absolute tolerance for "nothing changed" (px, seconds, 0..1 values) */
 const SIG_EPS = 1e-3;
 
+/* Base-canvas budget and render scale on touch devices */
+const TOUCH_BASE_MAX_PIXELS = 1280 * 720;
+const TOUCH_SCALE = 0.7;
+
 export function initOcean(){
-  const base = createRenderer('sea', { isUI: false });
-  const ui   = createRenderer('ui-glass', { isUI: true });
+  /* Set once the first frame has been drawn; canvas resize callbacks
+     that arrive earlier (or after a failed init) are ignored. */
+  let ready = false;
+
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+
+  const base = createRenderer('sea', {
+    isUI: false,
+    maxPixels: coarse ? TOUCH_BASE_MAX_PIXELS : undefined,
+    onResize: requestStaticRedraw
+  });
+  const ui = createRenderer('ui-glass', {
+    isUI: true,
+    onResize: requestStaticRedraw
+  });
 
   if (!base || !ui){
     document.body.classList.add('no-webgl');
@@ -39,7 +60,7 @@ export function initOcean(){
   }
 
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let scale = window.innerWidth > 1500 ? 0.72 : 0.85;
+  let scale = coarse ? TOUCH_SCALE : (window.innerWidth > 1500 ? 0.72 : 0.85);
 
   function getLocalDecimalHour() {
     const d = new Date();
@@ -81,6 +102,13 @@ export function initOcean(){
   let manualTimeOverride = false;
   let overrideTimeout = null;
   const ctrlTime = document.getElementById('ctrl-time');
+
+  /* A canvas changed size (rotation, window resize). While the loop is
+     running the next frame picks it up; otherwise draw one now. */
+  function requestStaticRedraw(){
+    if (!ready) return;
+    if (!running) render(true);
+  }
 
   function updateCSSColors(sunY) {
     // Sync to shader's widened twilight zone
@@ -239,8 +267,9 @@ export function initOcean(){
   
   updateCSSColors(state.sunDir[1]);
   render(true);
+  ready = true;
   
-  window.addEventListener('resize', () => { if (!running) render(true); });
+  window.addEventListener('resize', requestStaticRedraw);
   window.addEventListener('scroll', () => { if (!running){ syncScroll(); render(true); } }, { passive: true });
   Dive.onUpdate(() => { if (!running){ syncScroll(); render(true); } });
 

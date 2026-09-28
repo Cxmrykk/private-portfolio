@@ -1,40 +1,75 @@
 /* ============================================================
    Layout
+   Fluid first: type, padding and gaps scale with clamp(), so the
+   single 860px breakpoint only has to collapse the grids. The
+   navbar never wraps; it shrinks, and below 360px drops the
+   surname (see .mark-long).
    ============================================================ */
-.shell{width:var(--shell); margin-inline:auto}
 
+/* Same 92vw column as --shell, but never closer to the edge than a
+   notch / rounded-corner safe area (landscape phones). */
+.shell{
+  width:var(--shell);
+  width:min(var(--shell), calc(100vw - 2 * max(4vw, env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px))));
+  margin-inline:auto;
+}
+
+/* ---------- header / navbar ---------- */
 header.bar{
-  position:sticky; top:0; z-index:20;
-  margin-top:14px;
+  position:sticky; top:env(safe-area-inset-top, 0px); z-index:20;
+  margin-top:clamp(8px, 2vw, 14px);
 }
 .bar-inner{
-  display:flex; align-items:center; gap:18px; flex-wrap:wrap;
-  padding:11px 18px;
+  display:flex; align-items:center; flex-wrap:nowrap;
+  gap:clamp(6px, 2.4vw, 18px);
+  padding:clamp(7px, 1.6vw, 11px) clamp(10px, 2.6vw, 18px);
   border-radius:999px;
 }
+
+/* The name gives way first: it may shrink and ellipsize, the links
+   keep their natural width. */
 .mark{
-  display:flex; align-items:center;
-  padding:0 6px;
-  font-size:15px; font-weight:600; letter-spacing:.01em; color:var(--deep);
+  display:block;
+  flex:0 1 auto; min-width:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  padding:0 clamp(2px, 1vw, 6px);
+  font-size:clamp(13px, 3.6vw, 15px); font-weight:600; letter-spacing:.01em; color:var(--deep);
   text-decoration:none;
   text-shadow:0 1px 3px rgba(0,0,0,0.7);
 }
-nav.bar-nav{margin-left:auto; display:flex; gap:6px; flex-wrap:wrap}
+
+nav.bar-nav{
+  margin-left:auto; flex:0 0 auto;
+  display:flex; flex-wrap:nowrap; gap:clamp(0px, 1vw, 6px);
+}
 nav.bar-nav a{
-  padding:7px 15px; border-radius:999px; text-decoration:none;
-  color:var(--ink); font-size:14.5px;
+  position:relative;
+  padding:clamp(6px, 1.4vw, 7px) clamp(8px, 2.4vw, 15px);
+  border-radius:999px; text-decoration:none; white-space:nowrap;
+  color:var(--ink); font-size:clamp(13px, 3.5vw, 14.5px);
   border:1px solid transparent;
   text-shadow:0 1px 3px rgba(0,0,0,0.7);
+  -webkit-tap-highlight-color:transparent;
 }
-nav.bar-nav a:hover{
-  background:rgba(255,255,255,0.1);
-  border-color:rgba(255,255,255,0.2);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,0.15);
+/* ~44px touch target without changing the visual size. Vertical only,
+   so neighbouring links' hit areas never overlap. */
+nav.bar-nav a::after{
+  content:""; position:absolute; inset:-8px 0;
+}
+@media (hover:hover){
+  nav.bar-nav a:hover{
+    background:rgba(255,255,255,0.1);
+    border-color:rgba(255,255,255,0.2);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,0.15);
+  }
 }
 
-/* ---------- hero: bare type on water ---------- */
+/* ---------- hero: bare type on water ----------
+   svh = the viewport with the mobile toolbar shown, so the hero
+   doesn't jump as the toolbar collapses. vh line is the fallback. */
 .hero{
-  min-height:clamp(560px, 86vh, 900px);
+  min-height:clamp(480px, 86vh, 900px);
+  min-height:clamp(480px, 86svh, 900px);
   display:flex; flex-direction:column; justify-content:center;
   padding:clamp(48px,9vh,110px) 0 clamp(40px,7vh,80px);
   text-align:left;
@@ -59,7 +94,7 @@ nav.bar-nav a:hover{
   text-shadow:0 1px 2px rgba(4,40,70,.6);
   max-width:24ch;
 }
-.hero .cta-row{display:flex; gap:12px; flex-wrap:wrap; margin-top:34px}
+.hero .cta-row{display:flex; gap:12px; flex-wrap:wrap; margin-top:clamp(24px, 4vh, 34px)}
 
 .dive-hint{
   display:inline-flex; align-items:center; gap:11px; margin-top:30px;
@@ -123,7 +158,7 @@ section{margin:clamp(40px,7vh,86px) 0; scroll-margin-top:96px}
   border:1px solid rgba(255,255,255,0.15);
   box-shadow:inset 0 1px 0 rgba(255,255,255,0.1);
 }
-.facts span{color:var(--ink-soft); min-width:86px}
+.facts span{color:var(--ink-soft); min-width:86px; flex:none}
 
 .contact{text-align:center; padding:clamp(30px,5vw,54px)}
 .contact h2{
@@ -137,15 +172,22 @@ section{margin:clamp(40px,7vh,86px) 0; scroll-margin-top:96px}
 .links{display:flex; gap:12px; justify-content:center; flex-wrap:wrap}
 
 footer{
-  padding:26px 0 40px; text-align:center;
+  padding:26px 0 calc(40px + env(safe-area-inset-bottom, 0px)); text-align:center;
   font-size:13.5px; color:#dbf1ff;
   text-shadow:0 1px 3px rgba(4,40,70,.6);
 }
 footer a{color:#fff}
 
+/* ---------- breakpoints ---------- */
 @media (max-width:860px){
   .work{grid-template-columns:1fr}
   .split{grid-template-columns:1fr}
   .about{grid-template-columns:1fr}
-  nav.bar-nav{width:100%; margin-left:0}
+  /* the header is shorter here, so anchors need less clearance */
+  section{scroll-margin-top:76px}
+}
+
+/* Narrow phones: "Cameron" alone keeps the nav on one row */
+@media (max-width:360px){
+  .mark-long{display:none}
 }

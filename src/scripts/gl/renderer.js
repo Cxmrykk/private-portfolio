@@ -6,6 +6,16 @@
    (plus their shadow / refraction margin); everything outside
    is transparent, so no fragments are spent there.
 
+   Sizing:
+   - The drawing buffer follows the canvas's own CSS box, not the
+     window. The canvases are sized to the large viewport (100lvh,
+     see environment.css), so on mobile the URL bar collapsing and
+     expanding no longer changes the buffer size or reallocates the
+     ocean texture mid-scroll.
+   - The CSS box is tracked with a ResizeObserver instead of being
+     read each frame, so drawing never forces a synchronous layout.
+     opts.onResize is called when it changes.
+
    GPU budget:
    - The base canvas is capped to a pixel budget (BASE_MAX_PIXELS)
      so very large / high-DPI screens don't render 4+ MP per pass.
@@ -76,7 +86,7 @@ function glassType(el){
   return 0;
 }
 
-export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : BASE_MAX_PIXELS }){
+export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : BASE_MAX_PIXELS, onResize = null }){
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
 
@@ -121,11 +131,37 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   const tintsData  = new Float32Array(MAX_GLASS * 4); // dye r, g, b, strength
   const scissors = [];
 
+  /* ---- CSS box of the canvas ----
+     Panel rects (viewport CSS px) map onto the buffer through this box.
+     Both canvases are pinned to the top-left of the viewport, so the
+     mapping is a pure scale. */
+  let cssW = canvas.clientWidth  || window.innerWidth;
+  let cssH = canvas.clientHeight || window.innerHeight;
+
+  function setCssSize(w, h){
+    if (!(w >= 1 && h >= 1)) return;
+    if (w === cssW && h === cssH) return;
+    cssW = w; cssH = h;
+    if (onResize) onResize();
+  }
+
+  if ('ResizeObserver' in window){
+    new ResizeObserver((entries) => {
+      const box = entries[entries.length - 1].contentRect;
+      setCssSize(box.width, box.height);
+    }).observe(canvas);
+  } else {
+    window.addEventListener('resize', () => {
+      setCssSize(canvas.clientWidth || window.innerWidth,
+                 canvas.clientHeight || window.innerHeight);
+    });
+  }
+
   /* Drawing-buffer size for a requested DPR, shrunk uniformly if it
      would exceed this canvas's pixel budget. */
   function bufferSize(dpr){
-    let w = window.innerWidth * dpr;
-    let h = window.innerHeight * dpr;
+    let w = cssW * dpr;
+    let h = cssH * dpr;
     const px = w * h;
     if (px > maxPixels){
       const k = Math.sqrt(maxPixels / px);
@@ -155,7 +191,7 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     for (const it of items){
       if (count >= MAX_GLASS) break;
       const { el, style, rect, op, tint } = it;
-      if (rect.bottom < -150 || rect.top > window.innerHeight + 150) continue;
+      if (rect.bottom < -150 || rect.top > cssH + 150) continue;
 
       const type = glassType(el);
       const tk = tint ? tint[3] : 0;
@@ -231,7 +267,7 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   function draw(state, items, dpr){
     const [w, h] = bufferSize(dpr);
     resize(w, h);
-    const sx = w / window.innerWidth, sy = h / window.innerHeight;
+    const sx = w / cssW, sy = h / cssH;
     const { count, needsMips } = pack(items, h, sx, sy);
 
     /* ---- pass 1: ocean into the texture ---- */
