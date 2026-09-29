@@ -1,9 +1,9 @@
 /* ============================================================
    Layout
    Fluid first: type, padding and gaps scale with clamp(), so the
-   single 860px breakpoint only has to collapse the grids. The
-   navbar never wraps; it shrinks, and below 360px drops the
-   surname (see .mark-long).
+   single 860px breakpoint only has to collapse the grids and pull
+   the navbar out to the screen edges. The navbar never wraps; it
+   shrinks, and below 360px drops the surname (see .mark-long).
    ============================================================ */
 
 /* Same 92vw column as --shell, but never closer to the edge than a
@@ -17,7 +17,8 @@
 /* ---------- header / navbar ----------
    Fixed with a constant gap above it: it never moves while the
    page scrolls. The header strip spans the full width, so it
-   ignores the pointer and only the pill itself takes input. */
+   ignores the pointer and only the pill itself takes input.
+   On mobile the same gap is used at the sides (see breakpoints). */
 header.bar{
   position:fixed; left:0; right:0;
   top:calc(env(safe-area-inset-top, 0px) + var(--bar-gap));
@@ -131,11 +132,14 @@ nav.bar-nav a::after{
 body.is-underwater .dive-hint{opacity:0}
 
 /* ---------- sections ----------
-   Each section is one scroll stop (data-stop). Roughly a screen of
-   open water separates neighbours, so only one is ever in view and
-   each hop glides through the ocean between them. */
+   Each section is one scroll stop (data-stop). The open water
+   between neighbours is --stop-gap, sized per section by
+   scripts/scroll/sections.js to the least that still keeps only
+   one section on screen at a time. Until that runs, --section-gap
+   (one full screen) stands in. Stops must stay siblings here for
+   the gap to land between them. */
 section{margin:0}
-.shell > section + section{margin-top:var(--section-gap)}
+.shell > section + section{margin-top:var(--stop-gap, var(--section-gap))}
 
 .panel{padding:var(--pad)}
 .section-head{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:6px}
@@ -213,6 +217,15 @@ footer a{color:#fff}
   .about{grid-template-columns:1fr}
   /* the navbar is shorter here */
   :root{--bar-height:52px}
+
+  /* Navbar inset from the sides by the same gap it keeps from the
+     top. Like the top, each side is measured from the safe area,
+     so notches and rounded corners never eat into it. */
+  header.bar{
+    left:calc(env(safe-area-inset-left, 0px) + var(--bar-gap));
+    right:calc(env(safe-area-inset-right, 0px) + var(--bar-gap));
+  }
+  header.bar .shell{width:auto; margin-inline:0}
 }
 
 /* Narrow phones: "Cameron" alone keeps the nav on one row */

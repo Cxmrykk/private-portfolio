@@ -8,21 +8,25 @@
      hop      a timed glide to another stop, through the open
               water between sections; input is ignored meanwhile
 
+   The water between stops is sized by sections.js (layoutGaps)
+   on every refresh. When a resize changes it, the page is moved
+   so the reader stays on the same spot of the same section.
+
    Anything else that scrolls the window (scrollbar drag, find in
    page, focus moving into view) is detected as an external
    scroll: the engine adopts that position, picks the nearest
    stop, and once things go quiet eases out of any gap between
    sections into the nearest one.
    ============================================================ */
-import { getStops, measureRanges, nearestStop, clamp } from './sections.js';
+import { getStops, layoutGaps, measureRanges, nearestStop, clamp } from './sections.js';
 
 /* Per-frame easing at 60 fps: wheel / key steps, and touch flick glide */
 const EASE_STEP  = 0.16;
 const EASE_GLIDE = 0.075;
 
 /* Standard hop duration grows with distance, within these bounds */
-const HOP_MIN_MS = 400;
-const HOP_MAX_MS = 550;
+const HOP_MIN_MS = 700;
+const HOP_MAX_MS = 950;
 
 /* The initial plunge from the surface (or returning to it) takes longer */
 const DIVE_HOP_MS = 1400;
@@ -41,6 +45,7 @@ export function createScroller(){
   const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   let stops = getStops();
+  layoutGaps(stops);
   let ranges = measureRanges(stops);
 
   let currentY = window.scrollY;   // position on screen
@@ -99,10 +104,16 @@ export function createScroller(){
     return edge === 'end' ? r.end : r.start;
   }
 
-  /* Re-measure every stop. clampNow pulls the page back inside the
-     active range if the layout moved it out. */
+  /* Re-size the gaps and re-measure every stop. clampNow pulls the
+     page back inside the active range if the layout moved it out. */
   function refresh(clampNow = true){
+    /* Where the reader is inside the active stop, so a change in the
+       water above it doesn't carry them somewhere else. */
+    const prev = ranges[active];
+    const offset = prev ? currentY - prev.start : 0;
+
     stops = getStops();
+    const moved = layoutGaps(stops);
     ranges = measureRanges(stops);
     if (!ranges.length) return;
     active = Math.min(active, ranges.length - 1);
@@ -111,11 +122,24 @@ export function createScroller(){
       const r = ranges[hop.index];
       hop.to = hop.edge ? edgeY(hop.index, hop.edge) : clamp(hop.to, r.start, r.end);
       targetY = hop.to;
+      if (moved){
+        /* The glide's start point no longer exists; land now */
+        active = hop.index;
+        currentY = hop.to;
+        hop = null;
+        write(currentY);
+      }
+      return;
+    }
+
+    const r = ranges[active];
+    if (moved){
+      currentY = targetY = clamp(r.start + offset, r.start, r.end);
+      write(currentY);
       return;
     }
     if (!clampNow) return;
 
-    const r = ranges[active];
     const y = clamp(targetY, r.start, r.end);
     if (y !== targetY){
       targetY = y;
@@ -250,7 +274,9 @@ export function createScroller(){
   window.addEventListener('resize', () => refresh());
   window.addEventListener('load', () => refresh());
 
-  /* Fonts swapping in or text reflowing changes section heights */
+  /* Fonts swapping in or text reflowing changes section heights, and
+     with them the gaps. Re-sizing a gap resizes the body too, but the
+     second pass finds nothing to change, so this settles at once. */
   if ('ResizeObserver' in window){
     new ResizeObserver(() => refresh()).observe(document.body);
   }
