@@ -25,8 +25,7 @@ const EASE_STEP  = 0.16;
 const EASE_GLIDE = 0.075;
 
 /* Standard hop duration grows with distance, within these bounds */
-const HOP_MIN_MS = 700;
-const HOP_MAX_MS = 950;
+const HOP_MS = 1000;
 
 /* The initial plunge from the surface (or returning to it) takes longer */
 const DIVE_HOP_MS = 1400;
@@ -159,7 +158,8 @@ export function createScroller(){
         dur = DIVE_HOP_MS;
       } else {
         // Fast, snappy transitions for the rest of the deep water components
-        dur = clamp(300 + dist * 0.15, HOP_MIN_MS, HOP_MAX_MS);
+        dur = HOP_MS;
+        //dur = clamp(300 + dist * 0.15, HOP_MIN_MS, HOP_MAX_MS);
       }
     }
 
