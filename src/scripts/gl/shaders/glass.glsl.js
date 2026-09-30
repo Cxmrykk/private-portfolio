@@ -6,6 +6,12 @@
    (premultiplied alpha) that sits above the DOM.
    Physical sun / moon / shaft glints live in glint.glsl.js.
    Per-panel dye (Funky Seasons) lives in tint.glsl.js.
+
+   The per-pixel lighting shared by all panels (light position on
+   screen, colours, underwater dapple, half-vectors, view ray) is
+   set up lazily, on the first panel whose reach covers the pixel.
+   On the base canvas most pixels touch no panel and now only pay
+   for the ocean fetch and the cursor glow.
    ============================================================ */
 import { GLSL_COMMON } from './common.glsl.js';
 import { GLSL_GLINT } from './glint.glsl.js';
@@ -21,7 +27,7 @@ uniform vec3  uCursor;      // x, y in canvas px (y up); z = pointer presence 0.
 uniform float uPx;          // canvas pixels per CSS pixel
 uniform float uScroll;
 uniform float uDive;
-uniform float uShallow;     // seabed depth -> camera height -> water path length
+uniform float uShallow;     // seabed depth (shared GLSL)
 uniform int   uLayerRender; // 0 = base layer, 1 = UI layer
 uniform sampler2D uOcean;
 
@@ -121,38 +127,31 @@ void main(){
   float dive = clamp(uDive, 0.0, 1.0);
   float diveFade = smoothstep(0.0, 0.5, dive);
 
-  vec3  V      = vec3(0.0, 0.0, 1.0);
-  vec2  sunPx  = lightScreenPos(dive);
-  float envLightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
-  vec3  primaryCol = getPrimaryLightCol();
-  vec3  sunCol = mix(primaryCol, vec3(0.72, 0.95, 1.00) * envLightI, diveFade);
-  vec3  hiCol  = mix(sunCol, vec3(1.0), 0.7);
-
-  /* Underwater dapple. Every use below is scaled by diveFade, so above
-     the surface the caustic field has no effect; skip evaluating it. */
-  float dapple = (diveFade > 0.0)
-    ? getCaustics(fc * texel * vec2(uRes.x / uRes.y, 1.0) * 4.5 + vec2(0.0, uScroll * 0.4))
-    : 0.0;
-  float lightI = mix(1.0, 0.82 + 0.50 * dapple, diveFade) * envLightI;
-  
-  vec3  Ls     = normalize(vec3(sunPx - fc, 900.0 * uPx));
-  vec3  Hsun   = normalize(Ls + V);
-  vec3  Ls2    = normalize(vec3(fc - sunPx, 900.0 * uPx));
-  vec3  Hsun2  = normalize(Ls2 + V);
-  float sunNear = exp(-length(sunPx - fc) / (1100.0 * uPx));
+  vec3  V = vec3(0.0, 0.0, 1.0);
   float oShare = (uLayerRender == 0) ? 1.0 : 0.45;
 
-  vec3  rd = camRay((fc * 2.0 - uRes) / uRes.y);
-  float glintExpo = mix(1.28, 1.58, smoothstep(0.15, 0.60, dive));
-  bool  lightsReady = false;
-
+  /* Cursor light: the base layer adds its glow to every pixel */
   float curD = length(uCursor.xy - fc);
   float curW = exp(-curD / (320.0 * uPx)) * uCursor.z;
-  vec3  Lc = normalize(vec3(uCursor.xy - fc, 300.0 * uPx));
-  vec3  Hc = normalize(Lc + V);
 
   float shadowReach = 14.0 * uPx;
   float reach = shadowReach + 8.0 * uPx;
+
+  /* Per-pixel lighting shared by every panel; filled in on the first
+     panel within reach (see perPixelReady below). */
+  bool  perPixelReady = false;
+  vec2  sunPx = vec2(0.0);
+  vec3  sunCol = vec3(0.0);
+  vec3  hiCol = vec3(0.0);
+  float dapple = 0.0;
+  float lightI = 0.0;
+  vec3  Hsun = V;
+  vec3  Hsun2 = V;
+  float sunNear = 0.0;
+  vec3  rd = vec3(0.0, 0.0, -1.0);
+  float glintExpo = 1.28;
+  vec3  Hc = V;
+  bool  lightsReady = false;
 
   vec3  col = vec3(0.0);
   float alpha = 0.0;
@@ -178,6 +177,34 @@ void main(){
 
     vec2 q = abs(p) - hs;
     if (max(q.x, q.y) > reach) continue;
+
+    if (!perPixelReady){
+      perPixelReady = true;
+
+      sunPx = lightScreenPos(dive);
+      float envLightI = envLight();
+      sunCol = mix(getPrimaryLightCol(), vec3(0.72, 0.95, 1.00) * envLightI, diveFade);
+      hiCol  = mix(sunCol, vec3(1.0), 0.7);
+
+      /* Underwater dapple. Every use is scaled by diveFade, so above
+         the surface the caustic field has no effect; skip evaluating it. */
+      dapple = (diveFade > 0.0)
+        ? getCaustics(fc * texel * vec2(uRes.x / uRes.y, 1.0) * 4.5 + vec2(0.0, uScroll * 0.4))
+        : 0.0;
+      lightI = mix(1.0, 0.82 + 0.50 * dapple, diveFade) * envLightI;
+
+      vec3 Ls  = normalize(vec3(sunPx - fc, 900.0 * uPx));
+      Hsun     = normalize(Ls + V);
+      vec3 Ls2 = normalize(vec3(fc - sunPx, 900.0 * uPx));
+      Hsun2    = normalize(Ls2 + V);
+      sunNear  = exp(-length(sunPx - fc) / (1100.0 * uPx));
+
+      rd = camRay((fc * 2.0 - uRes) / uRes.y);
+      glintExpo = mix(1.28, 1.58, smoothstep(0.15, 0.60, dive));
+
+      vec3 Lc = normalize(vec3(uCursor.xy - fc, 300.0 * uPx));
+      Hc = normalize(Lc + V);
+    }
 
     vec2  grad; float dist = sdRect(p, hs, r, grad);
     float inside = 1.0 - smoothstep(-0.5, 0.5, dist);

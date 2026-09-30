@@ -2,9 +2,15 @@
    Shared GLSL — fullscreen vertex stage and the helpers both
    passes need (camera, celestial light, water constants, noise,
    sky, caustics).
-   GLSL_COMMON expects these uniforms to be declared by the
-   including shader before the chunk is inserted:
-     uTime, uMouse, uScroll, uDive, uShallow, uSunDir, uMoonDir
+
+   Per-frame constants (phase of day, light directions and
+   colours, camera) are uniforms computed once per frame on the
+   CPU (gl/lighting.js, gl/camera.js). The helper functions keep
+   their names and meaning, so the passes read them as before.
+
+   GLSL_COMMON declares its own uniforms (below) and expects the
+   including shader to declare, before the chunk is inserted:
+     uTime, uShallow
    ============================================================ */
 
 export const FULLSCREEN_VERT = `#version 300 es
@@ -14,8 +20,19 @@ void main(){
 }`;
 
 export const GLSL_COMMON = `
-uniform vec3 uSunDir;
-uniform vec3 uMoonDir;
+uniform vec3  uSunDir;       // normalised on the CPU (astronomy.js)
+uniform vec3  uMoonDir;
+
+/* Per-frame constants (gl/lighting.js) */
+uniform vec3  uPhase;        // dayW, sunsetW, nightW
+uniform vec3  uPrimaryDir;   // sun, or the moon once the sun is well below the horizon
+uniform vec3  uShaftDir;     // primary light refracted into the water, pointing back up
+uniform vec3  uPrimaryCol;   // primary light colour for the phase blend
+uniform float uEnvLight;     // overall scene light level, 0.15 night .. 1.0 day
+uniform float uSkyAmbient;   // luminance of the zenith sky (moon fade)
+uniform vec3  uCamOrigin;    // camera position
+uniform float uCamPitch;     // pitch shear applied to view rays
+uniform float uSubmergence;  // 0 in air, 1 under water
 
 /* Moon fade thresholds, in sky luminance. The moon is fully visible
    when the sky behind it is darker than LO and invisible above HI.
@@ -23,39 +40,35 @@ uniform vec3 uMoonDir;
 #define MOON_FADE_LO 0.03
 #define MOON_FADE_HI 0.14
 
+/* Below this cosine to the moon, its halo (pow(md, 600) * 0.6)
+   is under 1e-5 and the disc mask is zero, so the moon is skipped. */
+#define MOON_CULL 0.98
+
 /* ---------- lighting / celestial ---------- */
 vec3 getSunDir(){
-  return normalize(uSunDir);
+  return uSunDir;
 }
 
 vec3 getMoonDir(){
-  return normalize(uMoonDir);
+  return uMoonDir;
 }
 
+/* The Sun is vastly brighter: anywhere near the horizon or above, it dominates */
 vec3 getPrimaryLight(){
-  vec3 s = getSunDir();
-  vec3 m = getMoonDir();
-  // The Sun is vastly brighter. If it is anywhere near the horizon or above, it dominates.
-  return s.y > -0.05 ? s : m; 
+  return uPrimaryDir;
 }
 
+/* Snell's window: the primary light refracted through the surface
+   (IOR air / water), pointing back toward it from under water */
 vec3 getShaftDir(){
-  vec3 primary = getPrimaryLight();
-  // Ray from light source to the water surface
-  vec3 incident = -normalize(vec3(primary.x, max(primary.y, 0.001), primary.z));
-  // Refract through water surface (normal points UP)
-  // IOR air = 1.0, water = 1.333. Ratio = 0.75018
-  vec3 refracted = refract(incident, vec3(0.0, 1.0, 0.0), 0.75018);
-  // Return vector pointing BACK to the light source from underwater (Snell's Window)
-  return -normalize(refracted);
+  return uShaftDir;
 }
 
 /* Drags out the sunset and sunrise significantly */
 void getPhaseWeights(out float dayW, out float sunsetW, out float nightW){
-  float sunY = getSunDir().y;
-  dayW = smoothstep(0.15, 0.60, sunY);
-  nightW = 1.0 - smoothstep(-0.30, 0.0, sunY);
-  sunsetW = max(0.0, 1.0 - (dayW + nightW));
+  dayW = uPhase.x;
+  sunsetW = uPhase.y;
+  nightW = uPhase.z;
 }
 
 /* Rec. 601 luminance */
@@ -78,26 +91,16 @@ vec3 skyZenithCol(float dayW, float sunsetW, float nightW){
    (sun halo, sunset burn) so it also washes out near the afterglow.
    Pass 0.0 when there is no per-pixel context (e.g. glints). */
 float moonVisibility(float localLuma){
-  float dayW, sunsetW, nightW;
-  getPhaseWeights(dayW, sunsetW, nightW);
-  float ambient = skyLuma(skyZenithCol(dayW, sunsetW, nightW));
-  return 1.0 - smoothstep(MOON_FADE_LO, MOON_FADE_HI, ambient + localLuma);
+  return 1.0 - smoothstep(MOON_FADE_LO, MOON_FADE_HI, uSkyAmbient + localLuma);
 }
 
 vec3 getPrimaryLightCol(){
-  float dayW, sunsetW, nightW;
-  getPhaseWeights(dayW, sunsetW, nightW);
-
-  vec3 dayCol = vec3(1.00, 0.97, 0.90);
-  vec3 sunsetCol = vec3(1.00, 0.45, 0.15); // Fiery orange highlights
-  vec3 nightCol = vec3(0.50, 0.70, 1.00);
-
-  return dayCol * dayW + sunsetCol * sunsetW + nightCol * nightW;
+  return uPrimaryCol;
 }
 
 /* Overall scene light level: 0.15 at night, 1.0 in daylight */
 float envLight(){
-  return mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
+  return uEnvLight;
 }
 
 /* Schlick reflectance of the air/water interface (f0 = 0.02).
@@ -130,29 +133,16 @@ float seabedDepth(){ return mix(-27.0, -12.0, uShallow); }
 /* Pitch is applied as a shear on the ray, not a rotation, so the
    camera axes stay aligned with world x / y / -z. */
 float camPitch(){
-  float d = clamp(uDive, 0.0, 1.0);
-  return mix(-0.085 - uScroll * 0.02, 0.0, smoothstep(0.0, 0.45, d))
-       + smoothstep(0.30, 0.62, d) * (1.0 - smoothstep(0.70, 1.0, d) * 0.66) * 0.30
-       + uMouse.y * 0.035;
+  return uCamPitch;
 }
 
 /* Camera height: the piecewise dive curve + idle bob + mouse lift */
 float camHeight(){
-  float d = clamp(uDive, 0.0, 1.0);
-  float y;
-  if (d < 0.3){
-    float t = d / 0.3; y = 3.3 - 7.3 * t * t;
-  } else {
-    float t = (d - 0.3) / 0.7; y = mix(-4.0, seabedDepth() + 1.5, t);
-  }
-  return y + sin(uTime * 0.42) * 0.16 + uMouse.y * 0.35;
+  return uCamOrigin.y;
 }
 
 vec3 camOrigin(){
-  float sub = smoothstep(0.15, 0.60, clamp(uDive, 0.0, 1.0));
-  return vec3(uMouse.x * 1.6 + sin(uTime * 0.23) * 0.6 * sub,
-              camHeight(),
-              -uTime * 0.78);
+  return uCamOrigin;
 }
 
 /* uv = (fragCoord * 2 - res) / res.y */
@@ -163,7 +153,7 @@ vec3 camRay(vec2 uv){
 /* 0 in air, 1 under water. Crosses over while the camera is within
    one unit of the waterline, which the splash veil (|camY| < 2) hides. */
 float submergence(){
-  return 1.0 - smoothstep(-1.0, 1.0, camHeight());
+  return uSubmergence;
 }
 
 /* ---------- noise ---------- */
@@ -236,50 +226,58 @@ vec3 sky(vec3 rd, bool renderClouds){
 
   // Moon rendering (Frutiger Aero Stylized: Glowing, glassy, pristine orb)
   float md = dot(rd, moonDir);
-  float mRadius = 0.998; 
-  float moonMask = smoothstep(mRadius - 0.0003, mRadius + 0.0003, md);
-  
-  // Reconstruct the 3D surface normal of the moon for smooth shading
-  vec3 delta = rd - moonDir * md;
-  float maxDelta = sqrt(max(0.0, 1.0 - mRadius * mRadius));
-  vec3 normDelta = delta / max(maxDelta, 0.0001); 
-  float nz = sqrt(max(0.0, 1.0 - dot(normDelta, normDelta)));
-  vec3 moonNormal = normalize(normDelta + moonDir * nz);
-  
-  // Clearer phase definition: tighter smoothstep creates a distinct terminator line
-  float ndotl = dot(moonNormal, sunDir);
-  float diffuse = smoothstep(-0.08, 0.35, ndotl); 
-  
-  // Glossy Fresnel rim light
-  float fresnel = pow(1.0 - max(dot(moonNormal, -rd), 0.0), 3.0);
-  
-  // Ethereal Aero colors: distinct contrast between lit and dark
-  vec3 moonLit = vec3(0.95, 0.98, 1.0) + vec3(0.5, 0.75, 1.0) * pow(diffuse, 2.0); // Bright core
-  vec3 moonDark = mix(baseSky * 0.4, vec3(0.02, 0.15, 0.35), 0.65); // Deep, distinct shadow
-  
-  vec3 moonSurface = mix(moonDark, moonLit, diffuse);
-  
-  // Rim light heavily favors the lit side to avoid outlining the dark side incorrectly during a crescent
-  moonSurface += vec3(0.5, 0.85, 1.0) * fresnel * mix(0.1, 1.2, diffuse);
-  
+
   // Visibility from light intensity: the sky dome's brightness plus any
   // sun glow at this pixel. Golden hour keeps the dome bright, so the
   // moon stays hidden until the night palette takes over.
   float visibility = moonVisibility(skyLuma(sunHalo));
-  
-  // Bright atmospheric halo behind the moon
-  vec3 moonHalo = vec3(0.4, 0.7, 1.0) * pow(max(md, 0.0), 600.0) * 0.6 * visibility;
-  col += moonHalo;
-  
-  // Composite moon disk
-  col = mix(col, moonSurface, moonMask * visibility);
+
+  // Share of this pixel covered by the visible moon disc (masks the stars)
+  float moonCover = 0.0;
+
+  // Only directions near the moon can show its disc or halo
+  if (visibility > 0.0 && md > MOON_CULL){
+    float mRadius = 0.998; 
+    float moonMask = smoothstep(mRadius - 0.0003, mRadius + 0.0003, md);
+    
+    // Reconstruct the 3D surface normal of the moon for smooth shading
+    vec3 delta = rd - moonDir * md;
+    float maxDelta = sqrt(max(0.0, 1.0 - mRadius * mRadius));
+    vec3 normDelta = delta / max(maxDelta, 0.0001); 
+    float nz = sqrt(max(0.0, 1.0 - dot(normDelta, normDelta)));
+    vec3 moonNormal = normalize(normDelta + moonDir * nz);
+    
+    // Clearer phase definition: tighter smoothstep creates a distinct terminator line
+    float ndotl = dot(moonNormal, sunDir);
+    float diffuse = smoothstep(-0.08, 0.35, ndotl); 
+    
+    // Glossy Fresnel rim light
+    float fresnel = pow(1.0 - max(dot(moonNormal, -rd), 0.0), 3.0);
+    
+    // Ethereal Aero colors: distinct contrast between lit and dark
+    vec3 moonLit = vec3(0.95, 0.98, 1.0) + vec3(0.5, 0.75, 1.0) * pow(diffuse, 2.0); // Bright core
+    vec3 moonDark = mix(baseSky * 0.4, vec3(0.02, 0.15, 0.35), 0.65); // Deep, distinct shadow
+    
+    vec3 moonSurface = mix(moonDark, moonLit, diffuse);
+    
+    // Rim light heavily favors the lit side to avoid outlining the dark side incorrectly during a crescent
+    moonSurface += vec3(0.5, 0.85, 1.0) * fresnel * mix(0.1, 1.2, diffuse);
+    
+    // Bright atmospheric halo behind the moon
+    vec3 moonHalo = vec3(0.4, 0.7, 1.0) * pow(max(md, 0.0), 600.0) * 0.6 * visibility;
+    col += moonHalo;
+    
+    // Composite moon disk
+    col = mix(col, moonSurface, moonMask * visibility);
+    moonCover = moonMask * visibility;
+  }
 
   // Stars rendering
   if (nightW > 0.0 && rd.y > 0.0) {
     float starNoise = hash21(rd.xz / max(rd.y, 0.01) * 250.0 + 12.34);
     float starMask = smoothstep(0.995, 1.0, starNoise);
-    // (1.0 - moonMask * visibility) ensures stars never render ON top of the moon
-    col += vec3(1.0) * starMask * nightW * smoothstep(0.0, 0.1, rd.y) * (1.0 - moonMask * visibility);
+    // (1.0 - moonCover) ensures stars never render ON top of the moon
+    col += vec3(1.0) * starMask * nightW * smoothstep(0.0, 0.1, rd.y) * (1.0 - moonCover);
   }
 
   // Volumetric Clouds catching fire (Optimized out for reflections)

@@ -17,14 +17,22 @@
    scroll: the engine adopts that position, picks the nearest
    stop, and once things go quiet eases out of any gap between
    sections into the nearest one.
+
+   Timing: the engine steps in the 'scroll' phase of the shared
+   frame driver (../frame.js), so every scroll write lands in the
+   same frame, just before the ocean draws the glass for it. Finger
+   drags are applied there too rather than straight from touchmove;
+   otherwise on a high-refresh display the page could move on a
+   frame the glass is not redrawn on.
    ============================================================ */
 import { getStops, layoutGaps, measureRanges, nearestStop, clamp } from './sections.js';
+import { onFrame, wake } from '../frame.js';
 
 /* Per-frame easing at 60 fps: wheel / key steps, and touch flick glide */
 const EASE_STEP  = 0.16;
 const EASE_GLIDE = 0.075;
 
-/* Standard hop duration grows with distance, within these bounds */
+/* Standard hop duration */
 const HOP_MS = 1000;
 
 /* The initial plunge from the surface (or returning to it) takes longer */
@@ -56,7 +64,9 @@ export function createScroller(){
   /* { index, from, to, edge, t0, dur }; edge 'start' | 'end' | null */
   let hop = null;
 
-  let raf = 0, lastFrame = 0, settleTimer = 0;
+  /* True while there is motion (or a pending write) for tick() */
+  let animating = false;
+  let settleTimer = 0;
 
   function reduced(){ return motionQuery.matches; }
 
@@ -65,11 +75,9 @@ export function createScroller(){
     window.scrollTo(0, y);
   }
 
-  /* ---------- animation loop ---------- */
-  function tick(now){
-    raf = 0;
-    const dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.05) : 1 / 60;
-    lastFrame = now;
+  /* ---------- animation (frame driver, 'scroll' phase) ---------- */
+  function tick(now, dt){
+    if (!animating) return false;
 
     if (hop){
       const t = hop.dur > 0 ? Math.min(1, Math.max(0, now - hop.t0) / hop.dur) : 1;
@@ -85,17 +93,18 @@ export function createScroller(){
       if (Math.abs(targetY - currentY) < 0.5) currentY = targetY;
     }
 
-    write(currentY);
+    if (currentY !== written) write(currentY);
 
-    if (hop || currentY !== targetY) raf = requestAnimationFrame(tick);
-    else lastFrame = 0;
+    animating = hop !== null || currentY !== targetY;
+    return animating;
   }
 
   function kick(){
-    if (raf) return;
-    lastFrame = 0;
-    raf = requestAnimationFrame(tick);
+    animating = true;
+    wake();
   }
+
+  onFrame('scroll', tick);
 
   /* ---------- layout ---------- */
   function edgeY(index, edge){
@@ -149,18 +158,12 @@ export function createScroller(){
 
   /* ---------- hops ---------- */
   function startHop(index, y, edge){
-    const dist = Math.abs(y - currentY);
     let dur = 0;
-    
-    if (!reduced()) {
-      if (active === 0 || index === 0) {
-        // Grand transition to/from the hero component at the surface
-        dur = DIVE_HOP_MS;
-      } else {
-        // Fast, snappy transitions for the rest of the deep water components
-        dur = HOP_MS;
-        //dur = clamp(300 + dist * 0.15, HOP_MIN_MS, HOP_MAX_MS);
-      }
+
+    if (!reduced()){
+      /* The plunge to / from the surface hero is the grand transition;
+         hops between the deep-water sections are snappier. */
+      dur = (active === 0 || index === 0) ? DIVE_HOP_MS : HOP_MS;
     }
 
     hop = { index, from: currentY, to: y, edge, t0: performance.now(), dur };
@@ -225,13 +228,14 @@ export function createScroller(){
     kick();
   }
 
-  /* 1:1 finger tracking, clamped to the active section */
+  /* 1:1 finger tracking, clamped to the active section. The position
+     is taken immediately; the write happens on the next frame. */
   function dragBy(dy){
     if (hop || !ranges.length) return;
     const r = ranges[active];
     targetY = clamp(targetY + dy, r.start, r.end);
     currentY = targetY;
-    write(currentY);
+    kick();
   }
 
   /* Momentum after a flick; still clamped, so it never hops */
@@ -264,6 +268,7 @@ export function createScroller(){
 
     /* Someone else moved the page: adopt the position */
     hop = null;
+    animating = false;
     currentY = targetY = written = y;
     active = nearestStop(ranges, y).index;
 

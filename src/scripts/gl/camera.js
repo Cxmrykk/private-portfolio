@@ -1,11 +1,13 @@
 /* ============================================================
-   CAMERA — JS port of the camera model in common.glsl.js
-   Mirrors seabedDepth(), camHeight() and camOrigin() exactly so
-   CPU-side work (the bubble field) sees the same camera the
-   shaders do. Inputs map to the shader uniforms:
+   CAMERA — the camera model, computed on the CPU
+   The shaders no longer build the camera per pixel: camOrigin(),
+   camPitch() and submergence() are evaluated here once per frame
+   and uploaded as uniforms (gl/lighting.js). The bubble field
+   uses the same functions, so everything sees one camera.
+   Inputs map to the shader uniforms:
      clock → uTime, dive → uDive, shallow → uShallow,
-     mouseX / mouseY → uMouse
-   If the GLSL camera changes, change this file with it.
+     scroll → uScroll, mouseX / mouseY → uMouse
+   seabedDepth() is still mirrored in GLSL (common.glsl.js).
    ============================================================ */
 
 export function clamp(x, lo, hi){
@@ -39,18 +41,33 @@ export function diveHeight(dive, shallow){
   return mix(-4.0, seabedDepth(shallow) + 1.5, t);
 }
 
-/* GLSL: camHeight() — dive curve + idle bob + mouse lift */
+/* Camera height: dive curve + idle bob + mouse lift */
 export function camHeight(state){
   return diveHeight(state.dive, state.shallow)
        + Math.sin(state.clock * 0.42) * 0.16
        + state.mouseY * 0.35;
 }
 
-/* GLSL: camOrigin(). Writes into `out` to avoid per-frame allocation. */
+/* Camera position. Writes into `out` to avoid per-frame allocation. */
 export function camOrigin(state, out = [0, 0, 0]){
   const sub = smoothstep(0.15, 0.60, clamp(state.dive, 0, 1));
   out[0] = state.mouseX * 1.6 + Math.sin(state.clock * 0.23) * 0.6 * sub;
   out[1] = camHeight(state);
   out[2] = -state.clock * 0.78;
   return out;
+}
+
+/* Pitch, applied in the shader as a shear on the view ray (camRay),
+   so the camera axes stay aligned with world x / y / -z. */
+export function camPitch(state){
+  const d = clamp(state.dive, 0, 1);
+  return mix(-0.085 - state.scroll * 0.02, 0.0, smoothstep(0.0, 0.45, d))
+       + smoothstep(0.30, 0.62, d) * (1.0 - smoothstep(0.70, 1.0, d) * 0.66) * 0.30
+       + state.mouseY * 0.035;
+}
+
+/* 0 in air, 1 under water. Crosses over while the camera is within
+   one unit of the waterline, which the splash veil (|camY| < 2) hides. */
+export function submergence(state){
+  return 1.0 - smoothstep(-1.0, 1.0, camHeight(state));
 }

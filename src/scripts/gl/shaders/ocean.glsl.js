@@ -5,9 +5,12 @@
    pass refracts and frosts. Bubbles are drawn here too, so
    they sit behind the glass rather than over it.
    The camera, water absorption and shaft colour come from
-   GLSL_COMMON so the glass pass lights itself from the same model.
-   Bubble positions are computed per frame on the CPU
-   (gl/bubble-field.js); only the ray–sphere test runs here.
+   GLSL_COMMON so the glass pass lights itself from the same model;
+   the per-frame parts of that model (light, camera) are uniforms
+   computed on the CPU (gl/lighting.js).
+   Bubble positions are computed and frustum-culled per frame on
+   the CPU (gl/bubble-field.js); only the first uBubbleCount
+   entries are live, and only the ray–sphere test runs here.
 
    Sand: both floors (the deep seabed under water and the shallow
    floor seen through the surface from above) take their albedo
@@ -40,6 +43,7 @@ uniform float uChop;
 uniform float uShallow;
 uniform float uDive;
 uniform vec4  uBubbles[BUBBLE_COUNT]; // xyz = position relative to the camera (pre-wrapped), w = radius
+uniform int   uBubbleCount;           // visible bubbles, packed at the front of uBubbles
 uniform sampler2D uSand;              // seamless sand photo, sRGB-decoded to linear, mipmapped
 uniform vec3  uSandMean;              // mean linear colour of uSand
 
@@ -183,7 +187,7 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
 
   float dayW, sunsetW, nightW;
   getPhaseWeights(dayW, sunsetW, nightW);
-  float lightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
+  float lightI = envLight();
 
   float f0 = 0.02;
   float fres = f0 + (1.0 - f0) * pow(clamp(1.0 - dot(-rd, n), 0.0, 1.0), 5.0);
@@ -260,7 +264,7 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
 vec3 seabedColor(vec3 p){
   float dayW, sunsetW, nightW;
   getPhaseWeights(dayW, sunsetW, nightW);
-  float lightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
+  float lightI = envLight();
 
   vec2 q = p.xz;
 
@@ -292,7 +296,7 @@ vec3 seabedColor(vec3 p){
 vec3 renderUnder(vec3 ro, vec3 rd){
   float dayW, sunsetW, nightW;
   getPhaseWeights(dayW, sunsetW, nightW);
-  float lightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
+  float lightI = envLight();
   float bedY = seabedDepth();
   vec3 col; float t;
 
@@ -380,7 +384,7 @@ vec3 renderUnder(vec3 ro, vec3 rd){
   float shaft = 0.0;
   float dith  = hash21(gl_FragCoord.xy * 0.37 + fract(uTime) * 91.0);
   
-  // Reverted to 10 volumetric steps for smooth rendering and to prevent Moire banding
+  // 10 volumetric steps for smooth rendering and to prevent Moire banding
   float segLen = min(td, 60.0) / 10.0;
   vec3 sDir = getShaftDir();
   
@@ -404,9 +408,10 @@ vec3 renderUnder(vec3 ro, vec3 rd){
 
 /* ---------- True 3D Physical Bubbles (Frutiger Aero Physics) ----------
    Positions (buoyancy, helical wobble, wrap around the camera) are
-   computed once per frame on the CPU; see gl/bubble-field.js.
+   computed and culled once per frame on the CPU; see gl/bubble-field.js.
    uBubbles[i].xyz is the bubble relative to the camera, so it is
-   directly the camera-to-bubble vector. */
+   directly the camera-to-bubble vector. Only the first uBubbleCount
+   entries are live; they keep their original order. */
 vec3 addBubbles(vec3 col, vec3 rd, float amount){
   if (amount <= 0.001) return col;
   
@@ -423,6 +428,7 @@ vec3 addBubbles(vec3 col, vec3 rd, float amount){
   float focalZ = 2.5; // Focal plane distance for Depth of Field
   
   for (int i = 0; i < BUBBLE_COUNT; i++){
+    if (i >= uBubbleCount) break;
     vec4 b = uBubbles[i];
     vec3 V = b.xyz;          // Vector from camera to bubble
     float radius = b.w;

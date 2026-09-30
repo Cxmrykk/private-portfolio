@@ -17,6 +17,16 @@
    - Until the image arrives, each context holds a 1x1 texture in
      the fallback colour, so the sampler is always complete and
      nothing flashes black.
+
+   Avoiding hitches when the photo arrives:
+   - Decoded with createImageBitmap (off the main thread, and a
+     cheaper texture source than an <img>).
+   - The mean is summed in row bands, yielding whenever a slice
+     runs past SLICE_MS, instead of in one long loop. The sum is
+     the same, in the same order.
+   - Uploads (texImage2D + generateMipmap) are queued and run one
+     per animation frame, so the two contexts never upload in the
+     same frame.
    ============================================================ */
 import sandUrl from '../../assets/sand.jpg';
 
@@ -39,10 +49,56 @@ const FALLBACK_MEAN = Object.freeze([
 
 const MAX_ANISOTROPY = 8;
 
+/* Mean measurement: rows per getImageData call, and the longest
+   stretch of main-thread work before yielding */
+const BAND_ROWS = 64;
+const SLICE_MS = 4;
+
 let pending = null;
 
-/* Mean linear colour of the whole image */
-function measureMean(image){
+/* ---------- one upload per animation frame ---------- */
+const uploadQueue = [];
+let uploadRaf = 0;
+
+function drainUploads(){
+  uploadRaf = 0;
+  const job = uploadQueue.shift();
+  if (job) job();
+  if (uploadQueue.length) uploadRaf = requestAnimationFrame(drainUploads);
+}
+
+function scheduleUpload(job){
+  uploadQueue.push(job);
+  if (!uploadRaf) uploadRaf = requestAnimationFrame(drainUploads);
+}
+
+/* ---------- decode + measure ---------- */
+function yieldToBrowser(){
+  return new Promise((resolve) => {
+    if ('requestIdleCallback' in window) window.requestIdleCallback(() => resolve(), { timeout: 100 });
+    else setTimeout(resolve, 0);
+  });
+}
+
+async function decode(){
+  if ('createImageBitmap' in window){
+    try {
+      const response = await fetch(sandUrl);
+      const blob = await response.blob();
+      return await createImageBitmap(blob);
+    } catch (_){
+      /* fall through to <img> */
+    }
+  }
+  const image = new Image();
+  image.decoding = 'async';
+  image.src = sandUrl;
+  await image.decode();
+  return image;
+}
+
+/* Mean linear colour of the whole image, in time slices */
+async function measureMean(image){
   const w = image.naturalWidth || image.width;
   const h = image.naturalHeight || image.height;
   const canvas = document.createElement('canvas');
@@ -52,27 +108,38 @@ function measureMean(image){
   if (!ctx) return FALLBACK_MEAN.slice();
   ctx.drawImage(image, 0, 0, w, h);
 
-  const data = ctx.getImageData(0, 0, w, h).data;
   let r = 0, g = 0, b = 0;
-  for (let i = 0; i < data.length; i += 4){
-    r += SRGB_TO_LINEAR[data[i]];
-    g += SRGB_TO_LINEAR[data[i + 1]];
-    b += SRGB_TO_LINEAR[data[i + 2]];
+  let sliceStart = performance.now();
+
+  for (let y = 0; y < h; y += BAND_ROWS){
+    const rows = Math.min(BAND_ROWS, h - y);
+    const data = ctx.getImageData(0, y, w, rows).data;
+    for (let i = 0; i < data.length; i += 4){
+      r += SRGB_TO_LINEAR[data[i]];
+      g += SRGB_TO_LINEAR[data[i + 1]];
+      b += SRGB_TO_LINEAR[data[i + 2]];
+    }
+    if (performance.now() - sliceStart > SLICE_MS){
+      await yieldToBrowser();
+      sliceStart = performance.now();
+    }
   }
-  const n = Math.max(1, data.length / 4);
+
+  /* release the backing store */
+  canvas.width = canvas.height = 0;
+
+  const n = Math.max(1, w * h);
   return [r / n, g / n, b / n];
 }
 
-/* Decodes the image once. Resolves to { image, mean }, or null if
-   it failed (the fallback texture then simply stays in place). */
+/* Decodes and measures the image once. Resolves to { image, mean },
+   or null if it failed (the fallback texture then simply stays). */
 export function loadSand(){
   if (!pending){
     pending = (async () => {
-      const image = new Image();
-      image.decoding = 'async';
-      image.src = sandUrl;
-      await image.decode();
-      return { image, mean: measureMean(image) };
+      const image = await decode();
+      const mean = await measureMean(image);
+      return { image, mean };
     })().catch((err) => {
       console.warn('Sand texture failed to load; using the flat fallback.', err);
       return null;
@@ -82,8 +149,9 @@ export function loadSand(){
 }
 
 /* Creates this context's sand texture on unit 1 (unit 0 belongs to
-   the ocean render target). Always leaves TEXTURE0 active. */
-export function createSandTexture(gl){
+   the ocean render target). Always leaves TEXTURE0 active.
+   onUploaded is called once the photo is in this context. */
+export function createSandTexture(gl, onUploaded = null){
   const tex = gl.createTexture();
   const aniso = gl.getExtension('EXT_texture_filter_anisotropic');
 
@@ -119,5 +187,15 @@ export function createSandTexture(gl){
       handle.ready = true;
     }
   };
+
+  loadSand().then((data) => {
+    if (!data) return;
+    scheduleUpload(() => {
+      if (gl.isContextLost()) return;
+      handle.upload(data.image, data.mean);
+      if (onUploaded) onUploaded();
+    });
+  });
+
   return handle;
 }
