@@ -12,7 +12,10 @@
 
    The first stop always starts at the very top of the page (the
    surface), and the last one runs to the very bottom so the
-   footer is reachable from inside it.
+   footer is reachable from inside it. A last stop that fits is
+   pinned to the very bottom instead of being centred, so arriving
+   at it bottoms out the page with no leftover scroll (as long as
+   its top still clears the navbar there).
 
    Gaps: the water between two neighbouring stops is sized here
    (layoutGaps) instead of being a fixed screen height. The ranges
@@ -94,6 +97,9 @@ function largeViewportHeight(){
      below A   page visible under A's bottom while A is at its end
      above B   page visible over B's top while B is at its start
    The gap must exceed both, plus BLEED and the toolbar allowance.
+   (A last stop pinned to the page bottom starts at or below its
+   centred position, so the centred estimate used here is still
+   enough to keep its neighbour off screen.)
    Returns true if any gap changed (the layout moved). */
 export function layoutGaps(stops){
   if (stops.length < 2) return false;
@@ -152,7 +158,14 @@ export function measureRanges(stops){
     let end = fits ? start : top + h - vh + BOTTOM_SPACE;
 
     if (i === 0){ start = 0; if (fits) end = 0; }
-    if (i === last) end = max;
+    if (i === last){
+      end = max;
+      /* A last stop that fits lands on the page bottom itself rather
+         than a few px short of it, so there is no scroll left over
+         once it is reached. Only when its top still clears the
+         navbar there; otherwise it keeps its centred start. */
+      if (fits && i !== 0 && max <= top - topSpace) start = max;
+    }
 
     start = clamp(start, 0, max);
     end = clamp(end, start, max);

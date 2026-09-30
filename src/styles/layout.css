@@ -15,13 +15,13 @@
 }
 
 /* ---------- header / navbar ----------
-   Fixed with a constant gap above it: it never moves while the
-   page scrolls. The header strip spans the full width, so it
-   ignores the pointer and only the pill itself takes input.
+   Fixed with a constant gap above it (--bar-top): it never moves
+   while the page scrolls. The header strip spans the full width, so
+   it ignores the pointer and only the pill itself takes input.
    On mobile the same gap is used at the sides (see breakpoints). */
 header.bar{
   position:fixed; left:0; right:0;
-  top:calc(env(safe-area-inset-top, 0px) + var(--bar-gap));
+  top:var(--bar-top);
   z-index:20;
   pointer-events:none;
 }
@@ -35,7 +35,7 @@ header.bar{
 
 /* The fixed navbar is out of flow; keep content clear of it */
 main{
-  padding-top:calc(env(safe-area-inset-top, 0px) + var(--bar-gap) + var(--bar-height));
+  padding-top:calc(var(--bar-top) + var(--bar-height));
   padding-bottom:clamp(40px, 7vh, 86px);
 }
 
@@ -215,12 +215,19 @@ footer a{color:#fff}
   .work{grid-template-columns:1fr}
   .split{grid-template-columns:1fr}
   .about{grid-template-columns:1fr}
-  /* the navbar is shorter here */
-  :root{--bar-height:52px}
+
+  :root{
+    /* the navbar is shorter here */
+    --bar-height:52px;
+    /* Same distance from the top as from the sides. The status-bar
+       inset is not stacked on top of the gap, since it made the pill
+       sit visibly lower than it sits in from the edges. */
+    --bar-top:var(--bar-gap);
+  }
 
   /* Navbar inset from the sides by the same gap it keeps from the
-     top. Like the top, each side is measured from the safe area,
-     so notches and rounded corners never eat into it. */
+     top. Each side is measured from the safe area, so notches and
+     rounded corners (landscape) never eat into it. */
   header.bar{
     left:calc(env(safe-area-inset-left, 0px) + var(--bar-gap));
     right:calc(env(safe-area-inset-right, 0px) + var(--bar-gap));

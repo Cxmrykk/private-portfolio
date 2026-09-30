@@ -23,6 +23,12 @@
   --bar-gap:clamp(8px, 2vw, 14px);
   --bar-height:60px;
 
+  /* Distance from the top of the viewport to the navbar. On desktop
+     the gap sits below the safe area; on mobile (see layout.css) it
+     is the bare gap, so the pill is as far from the top as from the
+     sides even where the browser reports a status-bar inset. */
+  --bar-top:calc(env(safe-area-inset-top, 0px) + var(--bar-gap));
+
   /* Open water between sections before scripts/scroll/sections.js
      runs: one full screen, which always keeps a single section in
      view. The script then replaces it per section (--stop-gap) with
