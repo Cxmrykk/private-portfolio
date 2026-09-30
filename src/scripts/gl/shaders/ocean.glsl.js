@@ -8,6 +8,21 @@
    GLSL_COMMON so the glass pass lights itself from the same model.
    Bubble positions are computed per frame on the CPU
    (gl/bubble-field.js); only the ray–sphere test runs here.
+
+   Sand: both floors (the deep seabed under water and the shallow
+   floor seen through the surface from above) take their albedo
+   from uSand (gl/sand-texture.js) via sandAlbedo():
+     - the photo's mean colour (uSandMean) is divided out and the
+       tuned SAND_TARGET substituted, so the texture adds detail
+       without changing the grading
+     - a noise-driven blend of randomly offset copies hides the
+       tile grid (Quilez, "texture repetition")
+     - it is sampled with textureGrad(), using floor footprints
+       computed at the top of main() in uniform control flow, since
+       implicit derivatives inside the render branches are undefined
+       and shimmer at the branch edges and the horizon
+   uSand is declared here, not in GLSL_COMMON, so the glass pass
+   doesn't carry an unused sampler.
    ============================================================ */
 import { GLSL_COMMON } from './common.glsl.js';
 import { BUBBLE_COUNT } from '../bubble-field.js';
@@ -25,10 +40,73 @@ uniform float uChop;
 uniform float uShallow;
 uniform float uDive;
 uniform vec4  uBubbles[BUBBLE_COUNT]; // xyz = position relative to the camera (pre-wrapped), w = radius
+uniform sampler2D uSand;              // seamless sand photo, sRGB-decoded to linear, mipmapped
+uniform vec3  uSandMean;              // mean linear colour of uSand
 
 out vec4 fragColor;
 
 ${GLSL_COMMON}
+
+/* ---------- sand ---------- */
+#define SAND_TILE         3.5   // world units covered by one texture tile
+#define SAND_VARIATION    0.35  // tiles per cell of the anti-repetition noise
+#define SHALLOW_FLOOR_Y  -1.6   // floor height under the surface, seen from above
+#define SHALLOW_SAND_GAIN 1.28  // the shallow floor was authored brighter
+
+/* Average sand albedo the scene was tuned with; the photo's own mean
+   is replaced by this, so only its detail comes through. */
+const vec3 SAND_TARGET = vec3(0.66, 0.62, 0.50);
+
+/* Screen-space derivatives of the floor hit points, written once in
+   main() under uniform control flow and read inside the branches. */
+vec2 gBedDx, gBedDy;       // deep seabed (under water)
+vec2 gFloorDx, gFloorDy;   // shallow floor (from above, through the surface)
+
+/* p: world xz on the floor. dx, dy: its screen-space derivatives. */
+vec3 sandAlbedo(vec2 p, vec2 dx, vec2 dy){
+  vec2 uv  = p / SAND_TILE;
+  vec2 duvdx = dx / SAND_TILE;
+  vec2 duvdy = dy / SAND_TILE;
+
+  /* Pick between randomly offset copies of the tile with a slow
+     noise, and blend across the change so no seam shows. */
+  float l  = vnoise(uv * SAND_VARIATION) * 8.0;
+  float f  = fract(l);
+  float ia = floor(l + 0.5);
+  float ib = floor(l);
+  f = min(f, 1.0 - f) * 2.0;
+
+  vec2 offA = sin(vec2(3.0, 7.0) * ia);
+  vec2 offB = sin(vec2(3.0, 7.0) * ib);
+
+  vec3 a = textureGrad(uSand, uv + offA, duvdx, duvdy).rgb;
+  vec3 b = textureGrad(uSand, uv + offB, duvdx, duvdy).rgb;
+  vec3 tex = mix(a, b, smoothstep(0.2, 0.8, f - 0.1 * dot(a - b, vec3(1.0))));
+
+  return tex / max(uSandMean, vec3(0.02)) * SAND_TARGET;
+}
+
+/* Floor footprints for mip selection. Both are analytic stand-ins
+   for the hits the render branches find:
+     seabed   the ray against the seabed plane, exactly as
+              renderUnder() hits it wherever the seabed is drawn
+     shallow  the ray refracted by a FLAT sea at y = 0 down to the
+              shallow floor. The real path bends with the waves, but
+              the footprint size is what matters here, and ignoring
+              the wave warp keeps crests from blurring the sand. */
+void floorFootprints(vec3 ro, vec3 rd){
+  float ry = min(rd.y, -0.035);
+  vec2 bed = ro.xz + rd.xz * ((seabedDepth() - ro.y) / ry);
+  gBedDx = dFdx(bed);
+  gBedDy = dFdy(bed);
+
+  vec3 rdc = normalize(vec3(rd.x, min(rd.y, -0.01), rd.z));
+  vec3 s   = ro + rdc * (max(ro.y, 0.0) / -rdc.y);
+  vec3 tr  = refract(rdc, vec3(0.0, 1.0, 0.0), 1.0 / 1.333);
+  vec2 fl  = s.xz + tr.xz * (-SHALLOW_FLOOR_Y / max(-tr.y, 0.01));
+  gFloorDx = dFdx(fl);
+  gFloorDy = dFdy(fl);
+}
 
 /* ---------- wave field ---------- */
 float waveField(vec2 p, float dist, int max_octaves, out vec2 grad){
@@ -132,13 +210,11 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
   bodyDeep += sssCol * sss * lightI;
 
   vec3 rdRefr = refract(rd, n, 1.0 / 1.333);
-  float floorY = -1.6;
-  float tFloor = (floorY - p.y) / min(rdRefr.y, -0.01);
+  float tFloor = (SHALLOW_FLOOR_Y - p.y) / min(rdRefr.y, -0.01);
   vec3 pFloor = p + rdRefr * tFloor;
 
   float caustics = getCaustics(pFloor.xz);
-  float sandRipples = sin(pFloor.x * 6.0 + sin(pFloor.z * 4.0)) * 0.05 + 0.95;
-  vec3 sand = vec3(0.85, 0.80, 0.65) * sandRipples;
+  vec3 sand = sandAlbedo(pFloor.xz, gFloorDx, gFloorDy) * SHALLOW_SAND_GAIN;
   vec3 floorC = sand + vec3(1.0, 0.95, 0.8) * caustics * 2.0 * lightI;
 
   float depthWalk = max(tFloor, 0.0);
@@ -187,10 +263,12 @@ vec3 seabedColor(vec3 p){
   float lightI = mix(0.15, 1.0, smoothstep(-0.1, 0.2, getSunDir().y));
 
   vec2 q = p.xz;
-  float grain  = fbm(q * 0.55);
-  float ripple = sin(q.x * 1.7 + sin(q.y * 1.2) * 1.8) * 0.5 + 0.5;
-  vec3 sand = mix(vec3(0.40, 0.38, 0.30), vec3(0.88, 0.84, 0.70),
-                  clamp(grain * 0.65 + ripple * 0.35, 0.0, 1.0));
+
+  /* Photo detail, with a slow brightness drift on top so large
+     stretches of seabed don't read as one uniform material */
+  float grain = fbm(q * 0.55);
+  vec3 sand = sandAlbedo(q, gBedDx, gBedDy) * mix(0.84, 1.12, grain);
+
   float weed = smoothstep(0.52, 0.80, fbm(q * 0.22 + 7.3));
   sand = mix(sand, vec3(0.10, 0.24, 0.16), weed * 0.70);
   float rocks = smoothstep(0.74, 0.90, fbm(q * 0.95 + 21.0));
@@ -420,6 +498,10 @@ void main(){
 
   vec3 ro = camOrigin();
   vec3 rd = camRay(uv);
+
+  /* Before any branching: the sand's mip footprints need derivatives
+     taken in uniform control flow. */
+  floorFootprints(ro, rd);
 
   vec3 col;
   if (ro.y < waveHeight(ro.xz, 5) - 0.02){

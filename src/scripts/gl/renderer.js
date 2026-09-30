@@ -6,6 +6,12 @@
    (plus their shadow / refraction margin); everything outside
    is transparent, so no fragments are spent there.
 
+   Texture units:
+   - Unit 0: the ocean render target (sampled by the glass pass).
+   - Unit 1: the sand albedo (sampled by the ocean pass; see
+     sand-texture.js). TEXTURE0 is always left active, so every
+     bind of the ocean texture lands on unit 0.
+
    Sizing:
    - The drawing buffer follows the canvas's own CSS box, not the
      window. The canvases are sized to the large viewport (100lvh,
@@ -15,6 +21,11 @@
    - The CSS box is tracked with a ResizeObserver instead of being
      read each frame, so drawing never forces a synchronous layout.
      opts.onResize is called when it changes.
+
+   Assets:
+   - opts.onAssetReady is called once the sand image has been
+     uploaded into this context, so a paused or reduced-motion
+     page can redraw with it.
 
    GPU budget:
    - The base canvas is capped to a pixel budget (BASE_MAX_PIXELS)
@@ -29,6 +40,7 @@
 import { FULLSCREEN_VERT } from './shaders/common.glsl.js';
 import { OCEAN_FRAG } from './shaders/ocean.glsl.js';
 import { GLASS_FRAG } from './shaders/glass.glsl.js';
+import { createSandTexture, loadSand } from './sand-texture.js';
 
 export const MAX_GLASS = 60;
 
@@ -45,7 +57,11 @@ const BASE_MAX_PIXELS = 1920 * 1080;
    scalar uniforms. WebGL2 only guarantees 224 fragment vectors. */
 const GLASS_UNIFORM_VECTORS = MAX_GLASS * 3 + 16;
 
-const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow', 'uDive', 'uSunDir', 'uMoonDir', 'uBubbles'];
+/* Texture unit the sand albedo lives on (see sand-texture.js) */
+const SAND_UNIT = 1;
+
+const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow', 'uDive', 'uSunDir', 'uMoonDir',
+                        'uBubbles', 'uSand', 'uSandMean'];
 /* uShallow: the glass pass rebuilds the ocean camera (shared GLSL) so its
    glints can use real view rays, camera depth and beam positions. */
 const GLASS_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uCursor', 'uPx', 'uScroll', 'uDive', 'uShallow',
@@ -86,7 +102,7 @@ function glassType(el){
   return 0;
 }
 
-export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : BASE_MAX_PIXELS, onResize = null }){
+export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : BASE_MAX_PIXELS, onResize = null, onAssetReady = null }){
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
 
@@ -112,7 +128,8 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   if (!ocean || !glass) return null;
   gl.bindVertexArray(gl.createVertexArray());
 
-  /* ---- ocean render target ---- */
+  /* ---- ocean render target (unit 0) ---- */
+  gl.activeTexture(gl.TEXTURE0);
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -120,6 +137,14 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   const fbo = gl.createFramebuffer();
+
+  /* ---- sand albedo (unit 1): fallback now, the photo once decoded ---- */
+  const sand = createSandTexture(gl);
+  loadSand().then((data) => {
+    if (!data || gl.isContextLost()) return;
+    sand.upload(data.image, data.mean);
+    if (onAssetReady) onAssetReady();
+  });
 
   /* Tracks the current min filter so it is only changed when needed.
      Without a mip chain the texture must use LINEAR, or it would be
@@ -173,6 +198,7 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   function resize(w, h){
     if (canvas.width === w && canvas.height === h) return;
     canvas.width = w; canvas.height = h;
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
@@ -248,6 +274,7 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   /* Builds the mip chain only when something will sample it; otherwise
      drops to LINEAR so the texture stays complete without one. */
   function prepareOceanTexture(needsMips){
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     if (needsMips){
       if (!mipFiltering){
@@ -284,6 +311,14 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     gl.uniform1f(ocean.u.uShallow, state.shallow);
     gl.uniform1f(ocean.u.uDive, state.dive);
     gl.uniform4fv(ocean.u.uBubbles, state.bubbles);
+
+    /* Sand on unit 1. The sampler must never default to unit 0: that
+       unit holds the texture this pass is rendering into. */
+    gl.activeTexture(gl.TEXTURE0 + SAND_UNIT);
+    gl.bindTexture(gl.TEXTURE_2D, sand.tex);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(ocean.u.uSand, SAND_UNIT);
+    gl.uniform3f(ocean.u.uSandMean, sand.mean[0], sand.mean[1], sand.mean[2]);
 
     if (isUI){
       gl.clearColor(0, 0, 0, 0);

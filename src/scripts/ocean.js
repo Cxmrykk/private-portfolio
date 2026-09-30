@@ -23,6 +23,12 @@ import { getAstronomy } from './astronomy.js';
      budget and render scale. Phones have far weaker GPUs than their
      pixel density suggests, and starting low avoids the ~45 slow
      frames the downshift heuristic needs before it reacts.
+
+   Assets:
+   - The sand texture arrives asynchronously (gl/sand-texture.js).
+     Its arrival is not part of the frame signature, so the renderer
+     reports it via onAssetReady and the signature is invalidated,
+     which makes a paused or reduced-motion page redraw with it.
    ============================================================ */
 
 const TARGET_FPS = 60;
@@ -38,8 +44,8 @@ const TOUCH_BASE_MAX_PIXELS = 1280 * 720;
 const TOUCH_SCALE = 0.7;
 
 export function initOcean(){
-  /* Set once the first frame has been drawn; canvas resize callbacks
-     that arrive earlier (or after a failed init) are ignored. */
+  /* Set once the first frame has been drawn; canvas resize / asset
+     callbacks that arrive earlier (or after a failed init) are ignored. */
   let ready = false;
 
   const coarse = window.matchMedia('(pointer: coarse)').matches;
@@ -47,11 +53,13 @@ export function initOcean(){
   const base = createRenderer('sea', {
     isUI: false,
     maxPixels: coarse ? TOUCH_BASE_MAX_PIXELS : undefined,
-    onResize: requestStaticRedraw
+    onResize: requestStaticRedraw,
+    onAssetReady: requestStaticRedraw
   });
   const ui = createRenderer('ui-glass', {
     isUI: true,
-    onResize: requestStaticRedraw
+    onResize: requestStaticRedraw,
+    onAssetReady: requestStaticRedraw
   });
 
   if (!base || !ui){
@@ -103,10 +111,13 @@ export function initOcean(){
   let overrideTimeout = null;
   const ctrlTime = document.getElementById('ctrl-time');
 
-  /* A canvas changed size (rotation, window resize). While the loop is
-     running the next frame picks it up; otherwise draw one now. */
+  /* Something outside the frame signature changed (a canvas resized,
+     the sand texture arrived). Invalidate the signature so the running
+     loop draws the next frame even while paused; if the loop is not
+     running, draw one now. */
   function requestStaticRedraw(){
     if (!ready) return;
+    lastSig = null;
     if (!running) render(true);
   }
 
