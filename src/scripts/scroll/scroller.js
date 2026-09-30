@@ -18,6 +18,16 @@
    stop, and once things go quiet eases out of any gap between
    sections into the nearest one.
 
+   Recognising our own scrolls: WebKit on iOS scrolls in a
+   separate UI process, so a scroll event after scrollTo() can
+   report a position from a frame or two earlier. Comparing it
+   with only the last value written made every fast hop look
+   like an external scroll there: the hop was cancelled and the
+   settle pass eased the reader back into the section they had
+   just left. So every position written in the last RECENT_MS is
+   remembered, and a scroll event counts as ours when it lies
+   within the span of those writes (or of the hop in progress).
+
    Timing: the engine steps in the 'scroll' phase of the shared
    frame driver (../frame.js), so every scroll write lands in the
    same frame, just before the ocean draws the glass for it. Finger
@@ -41,6 +51,10 @@ const DIVE_HOP_MS = 1400;
 /* px of disagreement before a scroll counts as not ours */
 const SYNC_TOLERANCE = 2;
 
+/* How long a written position is remembered: covers the scroll
+   events iOS delivers late, with plenty of margin */
+const RECENT_MS = 400;
+
 /* Quiet time after an external scroll before leaving a gap */
 const SETTLE_MS = 350;
 
@@ -61,6 +75,10 @@ export function createScroller(){
   let active = nearestStop(ranges, currentY).index;
   let easeK = EASE_STEP;
 
+  /* Positions written recently, oldest first, with their times */
+  const recentY = [];
+  const recentT = [];
+
   /* { index, from, to, edge, t0, dur }; edge 'start' | 'end' | null */
   let hop = null;
 
@@ -70,9 +88,44 @@ export function createScroller(){
 
   function reduced(){ return motionQuery.matches; }
 
+  function pruneRecent(now){
+    let drop = 0;
+    while (drop < recentT.length && now - recentT[drop] > RECENT_MS) drop++;
+    if (drop){
+      recentY.splice(0, drop);
+      recentT.splice(0, drop);
+    }
+  }
+
   function write(y){
     written = y;
+    const now = performance.now();
+    pruneRecent(now);
+    recentY.push(y);
+    recentT.push(now);
     window.scrollTo(0, y);
+  }
+
+  /* Could this scroll position have come from one of our own writes,
+     possibly reported late (iOS)? */
+  function isOwnScroll(y){
+    if (Math.abs(y - written) <= SYNC_TOLERANCE) return true;
+
+    /* Anywhere along the hop in progress */
+    if (hop){
+      const lo = Math.min(hop.from, hop.to), hi = Math.max(hop.from, hop.to);
+      if (y >= lo - SYNC_TOLERANCE && y <= hi + SYNC_TOLERANCE) return true;
+    }
+
+    /* Within the span of the recent writes */
+    pruneRecent(performance.now());
+    if (!recentY.length) return false;
+    let lo = written, hi = written;
+    for (let i = 0; i < recentY.length; i++){
+      if (recentY[i] < lo) lo = recentY[i];
+      if (recentY[i] > hi) hi = recentY[i];
+    }
+    return y >= lo - SYNC_TOLERANCE && y <= hi + SYNC_TOLERANCE;
   }
 
   /* ---------- animation (frame driver, 'scroll' phase) ---------- */
@@ -264,12 +317,14 @@ export function createScroller(){
 
   window.addEventListener('scroll', () => {
     const y = window.scrollY;
-    if (Math.abs(y - written) <= SYNC_TOLERANCE) return;
+    if (isOwnScroll(y)) return;
 
     /* Someone else moved the page: adopt the position */
     hop = null;
     animating = false;
     currentY = targetY = written = y;
+    recentY.length = 0;
+    recentT.length = 0;
     active = nearestStop(ranges, y).index;
 
     clearTimeout(settleTimer);
