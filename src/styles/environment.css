@@ -6,6 +6,24 @@
   --light-blend: 1;
 }
 
+/* ---------- stacking order ----------
+   Everything stays at z-index >= 0. A WebGL canvas at a negative
+   z-index relies on the browser painting it above the (propagated)
+   body background; Firefox does not always do that and can paint
+   the background over it, leaving only the page colour visible.
+   So the ocean sits at 0 and the page content is lifted above it
+   (main / footer at 2, see layout.css) instead:
+
+     0   #sea            base WebGL canvas (ocean + low-z glass)
+     1   .atmosphere     horizon haze / top light
+     2   main, footer    page content (layout.css)
+     12  #splash         surface-break veil
+     13  #ui-blur-layer  CSS backdrop blur under UI panels
+     15  #ui-glass       UI WebGL canvas (header, controls glass)
+     20  header.bar      (layout.css)
+     30  .sea-controls   (components.css)
+     50  .skip           (components.css) */
+
 /* ---------- the ocean ----------
    Both WebGL canvases are pinned to the top-left and sized to the
    LARGE viewport (100lvh). On mobile the browser toolbar collapsing
@@ -19,7 +37,8 @@
   height:100%;
   height:100lvh;
   display:block;
-  z-index:-3;
+  z-index:0;
+  pointer-events:none;
 }
 
 /* ---------- the UI overlays ---------- */
@@ -55,7 +74,7 @@ body.no-webgl.is-underwater{
 
 /* soft horizon haze + top light, sits above canvas, below content */
 .atmosphere{
-  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  position:fixed; inset:0; z-index:1; pointer-events:none;
   transition:opacity .9s ease;
   background:
     radial-gradient(90% 46% at 50% 0%, rgba(255,255,255,calc(0.34 * var(--light-blend))), rgba(255,255,255,0) 62%),

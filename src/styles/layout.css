@@ -33,8 +33,13 @@ header.bar{
   pointer-events:auto;
 }
 
-/* The fixed navbar is out of flow; keep content clear of it */
+/* The fixed navbar is out of flow; keep content clear of it.
+   main (and footer, below) form the content layer at z-index 2,
+   above the ocean canvas (0) and the atmosphere (1); see the
+   stacking order in environment.css. */
 main{
+  position:relative;
+  z-index:2;
   padding-top:calc(var(--bar-top) + var(--bar-height));
   padding-bottom:clamp(40px, 7vh, 86px);
 }
@@ -203,7 +208,10 @@ section{margin:0}
 }
 .links{display:flex; gap:12px; justify-content:center; flex-wrap:wrap}
 
+/* Same content layer as main (z-index 2), above the ocean canvas */
 footer{
+  position:relative;
+  z-index:2;
   padding:26px 0 calc(40px + env(safe-area-inset-bottom, 0px)); text-align:center;
   font-size:13.5px; color:#dbf1ff;
   text-shadow:0 1px 3px rgba(4,40,70,.6);
