@@ -27,7 +27,8 @@ body.is-underwater .glass{
   padding:12px 26px; border-radius:999px;
   font:600 15px/1 "Segoe UI",Tahoma,Verdana,sans-serif;
   text-decoration:none; color:#fff;
-  /* Drawn by the glass pass (type 1 gel, type 2 clear) */
+  /* Drawn by the glass pass: type 1 is blue-dyed gel glass (the dye
+     is set in glass.glsl.js), type 2 (.ghost) is clear glass */
   background:transparent !important;
   border:1px solid transparent !important;
   box-shadow:none !important;
@@ -228,14 +229,21 @@ body.is-underwater .glass{
   outline:2px solid #ffe08a; outline-offset:2px;
 }
 
+/* Pause + Reset share one row, each taking half */
+.panel-actions{
+  display:flex; gap:8px; margin-top:4px;
+}
+.panel-actions .panel-btn{flex:1 1 0; min-width:0}
+
 .panel-btn{
   cursor:pointer; font:600 13px/1 "Segoe UI",Tahoma,sans-serif;
   padding:9px 14px; border-radius:999px; color:#d4f0ff;
   background:rgba(0,0,0,0.2);
   border:1px solid rgba(255,255,255,0.2);
   box-shadow:inset 0 1px 0 rgba(255,255,255,0.1);
-  margin-top:4px;
+  -webkit-tap-highlight-color:transparent;
 }
+.panel-btn:active{transform:translateY(1px)}
 .panel-btn[aria-pressed="true"]{
   color:#fff;
   background:linear-gradient(180deg,#7fd3ff,#1f9ce0 48%,#0b6fb4 52%,#09609c);

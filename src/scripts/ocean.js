@@ -22,6 +22,13 @@ import { getAstronomy } from './astronomy.js';
    - Reduced motion: no continuous animation. A frame is drawn only
      when an input changed (scroll, sliders, resize, assets).
 
+   Water controls:
+   - Moving the time slider pins the time of day there for the
+     rest of the visit; only Reset (or a reload) hands it back to
+     the local clock.
+   - Reset restores every control to the default written in the
+     HTML and resumes the animation.
+
    GPU budget:
    - A frame is only drawn when its inputs changed (clock, sliders,
      dive, scroll, pointer, glass layout).
@@ -108,8 +115,8 @@ export function initOcean(){
   let shallowTarget = 0.0;
   let paused = false;
 
+  /* Set once the visitor picks a time; stays until Reset or a reload */
   let manualTimeOverride = false;
-  let overrideTimeout = null;
   const ctrlTime = document.getElementById('ctrl-time');
   let ctrlTimeValue = NaN;   // last value written to the time slider
 
@@ -216,15 +223,18 @@ export function initOcean(){
     state.scroll = Math.min(window.scrollY / Math.max(window.innerHeight, 1), 1.5);
   }
 
+  /* Follow the visitor's local clock (unless they picked a time) */
+  function followClock(){
+    state.date.setTime(Date.now());
+    state.dayTime = getLocalDecimalHour(state.date);
+    syncTimeSlider();
+  }
+
   /* Advance the animated state by dt seconds */
   function advance(dt){
     if (!paused) {
       state.clock += dt;
-      if (!manualTimeOverride) {
-        state.date.setTime(Date.now());
-        state.dayTime = getLocalDecimalHour(state.date); // Driven by actual local clock
-        syncTimeSlider();
-      }
+      if (!manualTimeOverride) followClock();
     }
 
     // Process positional orbits
@@ -296,18 +306,31 @@ export function initOcean(){
   const ctrlChop = document.getElementById('ctrl-chop');
   const ctrlShallow = document.getElementById('ctrl-shallow');
   const ctrlPlay = document.getElementById('ctrl-play');
+  const ctrlReset = document.getElementById('ctrl-reset');
+
+  function setPaused(next){
+    paused = next;
+    if (!ctrlPlay) return;
+    ctrlPlay.setAttribute('aria-pressed', String(paused));
+    ctrlPlay.textContent = paused ? 'Resume' : 'Pause';
+  }
+
+  /* Put a slider back to its HTML default and let every listener
+     (this module, the dive controller) react as if the user moved it */
+  function resetSlider(input){
+    if (!input) return;
+    input.value = input.defaultValue;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
 
   if (ctrlTime) {
     syncTimeSlider();
 
+    /* The picked time stays until Reset or a reload */
     ctrlTime.addEventListener('input', (e) => {
       state.dayTime = parseFloat(e.target.value) / 100;
       ctrlTimeValue = Math.round(state.dayTime * 100);
       manualTimeOverride = true;
-      clearTimeout(overrideTimeout);
-
-      // Auto-resume cycle 5 seconds after they finish dragging
-      overrideTimeout = setTimeout(() => { manualTimeOverride = false; }, 5000);
       requestRedraw();
     });
   }
@@ -329,9 +352,22 @@ export function initOcean(){
 
   if (ctrlPlay){
     ctrlPlay.addEventListener('click', () => {
-      paused = !paused;
-      ctrlPlay.setAttribute('aria-pressed', String(paused));
-      ctrlPlay.textContent = paused ? 'Resume Animation' : 'Pause Animation';
+      setPaused(!paused);
+      requestRedraw();
+    });
+  }
+
+  if (ctrlReset){
+    ctrlReset.addEventListener('click', () => {
+      /* Resume first, so the reef slider eases back rather than snapping */
+      setPaused(false);
+
+      /* Time of day: back to the local clock */
+      manualTimeOverride = false;
+      followClock();
+
+      resetSlider(ctrlChop);
+      resetSlider(ctrlShallow);
       requestRedraw();
     });
   }

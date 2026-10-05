@@ -7,6 +7,11 @@
    Physical sun / moon / shaft glints live in glint.glsl.js.
    Per-panel dye (Funky Seasons) lives in tint.glsl.js.
 
+   Gel buttons (type 1) are dyed glass too: their blue gradient
+   is the panel's dye, not a flat fill laid over the water. The
+   refracted water takes the blue, the bevels deepen it, and the
+   shadow, rim light and glints all come out blue.
+
    The per-pixel lighting shared by all panels (light position on
    screen, colours, underwater dapple, half-vectors, view ray) is
    set up lazily, on the first panel whose reach covers the pixel.
@@ -76,6 +81,9 @@ vec3 envReflect(vec3 R, float dive){
   return mix(above, below, dive);
 }
 
+/* tint:  for the gel button (type 1), the dye gradient of the glass
+          itself; main() hands it to the tint pipeline at full strength.
+   tintW: share of a flat colour laid over the refraction (0 = none). */
 void material(float type, vec2 lu, out vec3 tint, out float tintW, out float frostLod, out float shadowW, out float bevK, out float thick){
   tint = vec3(1.0);
   if (type < 0.5){
@@ -85,10 +93,13 @@ void material(float type, vec2 lu, out vec3 tint, out float tintW, out float fro
     bevK = 0.30;
     thick = 1.6;
   } else if (type < 1.5){
+    /* Classic two-tone aqua gel: light upper half, deeper lower half.
+       Clamped, since the cast shadow evaluates it outside the panel. */
+    float y = clamp(lu.y, 0.0, 1.0);
     vec3 c1 = vec3(0.56, 0.86, 1.00), c2 = vec3(0.18, 0.65, 0.91);
     vec3 c3 = vec3(0.05, 0.46, 0.75), c4 = vec3(0.04, 0.37, 0.63);
-    tint = lu.y > 0.52 ? mix(c2, c1, (lu.y - 0.52) / 0.48) : mix(c4, c3, lu.y / 0.52);
-    tintW = 0.80;
+    tint = y > 0.52 ? mix(c2, c1, (y - 0.52) / 0.48) : mix(c4, c3, y / 0.52);
+    tintW = 0.0;
     frostLod = 0.6;
     shadowW = 0.26;
     bevK = 0.50;
@@ -215,6 +226,14 @@ void main(){
 
     vec3 tint; float tintW, frostLod, shadowW, bevK, thick;
     material(type, lu, tint, tintW, frostLod, shadowW, bevK, thick);
+
+    /* Gel buttons: the blue gradient is the glass's own dye, so it
+       drives the refraction colour, bevel absorption, shadow and glints */
+    if (type > 0.5 && type < 1.5){
+      dye = tint;
+      tk = 1.0;
+    }
+
     float lI   = lightI;
     float bev  = clamp(min(hs.x, hs.y) * bevK, 6.0 * uPx, 30.0 * uPx);
 
