@@ -4,7 +4,8 @@ import { createRenderer } from './gl/renderer.js';
 import { scanGlass, syncBlurLayer } from './gl/glass-scan.js';
 import { createBubbleBuffer, updateBubbles } from './gl/bubble-field.js';
 import { createFrameUniforms, updateFrameUniforms } from './gl/lighting.js';
-import { getAstronomy } from './astronomy.js';
+import { loadSky } from './sky/sky-data.js';
+import { createCelestial } from './sky/celestial.js';
 
 /* ============================================================
    THE OCEAN — orchestrator
@@ -18,14 +19,23 @@ import { getAstronomy } from './astronomy.js';
      The driver also paces frames (~60 fps, divided down from the
      display's refresh rate).
    - Shaders compile asynchronously where supported; the first
-     frame is drawn once both contexts report their programs ready.
+     frame is drawn once both contexts report their programs ready
+     and the sky data has loaded (or failed / timed out).
+
+   Sky (sky/):
+   - The time of day is Sydney's local time. The sun's arc is
+     anchored to Sydney's real sunrise and sunset, and the moon's
+     phase follows the real lunar phases, both from sky.json
+     (published hourly by the deploy workflow).
+   - Until sky.json arrives, or if it is unavailable, the sky uses
+     a 6:00 / 18:00 day and a full moon, still on Sydney time.
    - Reduced motion: no continuous animation. A frame is drawn only
      when an input changed (scroll, sliders, resize, assets).
 
    Water controls:
    - Moving the time slider pins the time of day there for the
      rest of the visit; only Reset (or a reload) hands it back to
-     the local clock.
+     the Sydney clock.
    - Reset restores every control to the default written in the
      HTML and resumes the animation.
 
@@ -46,7 +56,8 @@ import { getAstronomy } from './astronomy.js';
    - Only --light-blend is written, and only on the two overlays
      that use it (.atmosphere, #splash), after drawing, so it never
      restyles the whole document before the glass scan reads it.
-   - Per-frame state (astronomy, signature) reuses its buffers.
+   - Per-frame state (sun / moon directions, signature) reuses its
+     buffers.
    ============================================================ */
 
 /* Absolute tolerance for "nothing changed" (px, seconds, 0..1 values) */
@@ -85,16 +96,16 @@ export function initOcean(){
   const running = !reduced;
   const scale = coarse ? TOUCH_SCALE : (window.innerWidth > 1500 ? 0.72 : 0.85);
 
-  function getLocalDecimalHour(d) {
-    return d.getHours() + (d.getMinutes() / 60) + (d.getSeconds() / 3600) + (d.getMilliseconds() / 3600000);
-  }
+  /* Sydney's clock with the default sky until sky.json arrives */
+  let celestial = createCelestial(null);
+  let skyPending = true;
 
-  const now0 = new Date();
+  const now0 = Date.now();
   const state = {
     clock: 0,
-    date: now0,
-    dayTime: getLocalDecimalHour(now0), // Mapped reliably to the 24h clock for the slider
-    sunDir: [0, 1, 0],                  // Written in place by astronomy.js
+    now: now0,                          // instant the sky is computed for (ms)
+    dayTime: celestial.localHour(now0), // Sydney local hour, 0..24 (the time slider)
+    sunDir: [0, 1, 0],                  // Written in place by celestial.js
     moonDir: [0, -1, 0],
     mouseX: 0, mouseY: 0,               // parallax, normalised -1..1
     cursorX: -1e4, cursorY: -1e4,       // pointer light, CSS px
@@ -105,7 +116,7 @@ export function initOcean(){
     frame: createFrameUniforms()        // per-frame shader constants (gl/lighting.js)
   };
 
-  /* astronomy.js writes straight into state.sunDir / state.moonDir */
+  /* celestial.js writes straight into state.sunDir / state.moonDir */
   const astro = { sun: state.sunDir, moon: state.moonDir };
 
   /* Reused view description for bubble culling */
@@ -159,6 +170,11 @@ export function initOcean(){
     if (v === ctrlTimeValue) return;
     ctrlTimeValue = v;
     ctrlTime.value = v;
+  }
+
+  /* Sun and moon directions for the current instant and time of day */
+  function updateSky(){
+    celestial.write(state.now, state.dayTime, astro);
   }
 
   /* Everything that can change what either canvas shows, written
@@ -223,10 +239,10 @@ export function initOcean(){
     state.scroll = Math.min(window.scrollY / Math.max(window.innerHeight, 1), 1.5);
   }
 
-  /* Follow the visitor's local clock (unless they picked a time) */
+  /* Follow the Sydney clock (unless the visitor picked a time) */
   function followClock(){
-    state.date.setTime(Date.now());
-    state.dayTime = getLocalDecimalHour(state.date);
+    state.now = Date.now();
+    state.dayTime = celestial.localHour(state.now);
     syncTimeSlider();
   }
 
@@ -238,7 +254,7 @@ export function initOcean(){
     }
 
     // Process positional orbits
-    getAstronomy(state.date, state.dayTime, astro);
+    updateSky();
 
     /* Frame-rate independent easing, calibrated so each factor behaves
        exactly as the old per-frame value did at 60 fps. */
@@ -262,10 +278,11 @@ export function initOcean(){
     if (!ready){
       const b = base.status(), u = ui.status();
       if (b === 'failed' || u === 'failed'){ fail(); return false; }
-      if (b !== 'ready' || u !== 'ready') return true;   // still compiling: poll
+      /* still compiling, or still waiting for sky.json: poll */
+      if (b !== 'ready' || u !== 'ready' || skyPending) return true;
 
       ready = true;
-      getAstronomy(state.date, state.dayTime, astro);
+      updateSky();
       syncScroll();
       render(true);
       forceNext = false;
@@ -278,7 +295,7 @@ export function initOcean(){
     } else {
       /* Static: follow scroll and sliders, no clock */
       syncScroll();
-      getAstronomy(state.date, state.dayTime, astro);
+      updateSky();
     }
 
     render(forceNext);
@@ -286,6 +303,14 @@ export function initOcean(){
     writeLightBlend();
     return running;
   }
+
+  /* ---- sky data: Sydney sunrise / sunset and moon phases ---- */
+  loadSky().then((data) => {
+    if (data) celestial = createCelestial(data);
+    skyPending = false;
+    if (!manualTimeOverride) followClock();
+    requestRedraw();
+  });
 
   onFrame('render', onRender);
 
@@ -362,7 +387,7 @@ export function initOcean(){
       /* Resume first, so the reef slider eases back rather than snapping */
       setPaused(false);
 
-      /* Time of day: back to the local clock */
+      /* Time of day: back to the Sydney clock */
       manualTimeOverride = false;
       followClock();
 

@@ -1,0 +1,86 @@
+# ============================================================
+# DEPLOY — builds the site, fetches Sydney's sky data, and
+# publishes both to GitHub Pages as one artifact.
+#
+# Runs on every push to main, every hour (sky.json refresh) and
+# on demand. sky.json is never committed: it only exists in the
+# deployed artifact, next to index.html.
+#
+# Requires: Settings → Pages → Source = "GitHub Actions".
+# ============================================================
+name: Deploy site with sky data
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Hourly, a few minutes past the hour (the top of the hour is
+    # the busiest slot for scheduled workflows and runs late most).
+    - cron: '7 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a queued run is never cancelled
+# mid-deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+
+      - name: Fetch Sydney sky data
+        env:
+          # Fallback when the USNO API is unreachable: reuse what is
+          # already deployed rather than failing the deploy.
+          PREVIOUS_SKY_URL: ${{ steps.pages.outputs.base_url }}/sky.json
+        run: node scripts/fetch-sky.mjs _site/sky.json
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
