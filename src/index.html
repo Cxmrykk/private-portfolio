@@ -146,13 +146,16 @@
   <div class="shell"><span data-year></span> — Cameron Merrick's Website — <a href="#top">Back to the surface</a></div>
 </footer>
 
-<!-- The toggle comes first in the DOM so Tab moves from "Settings"
+<!-- The toggle comes first in the DOM so Tab moves from the pill
      straight into the sliders; CSS (column-reverse) draws the panel
      above it. settings-toggle.js drives .is-open / aria-expanded.
+     The pill's label is Sydney's current time (clock-label.js fills
+     [data-clock] and sets the button's aria-label); "Sydney NSW" is
+     what shows until it runs.
      Reset restores each slider's value attribute below. -->
 <div class="sea-controls" role="group" aria-label="Water controls">
-  <button type="button" class="sea-status glass" aria-expanded="false" aria-controls="sea-panel">
-    <span class="settings-hint">Settings</span>
+  <button type="button" class="sea-status glass" aria-label="Settings" aria-expanded="false" aria-controls="sea-panel">
+    <span class="settings-hint" data-clock>Sydney NSW</span>
   </button>
   <div class="sea-panel glass" id="sea-panel">
     <label>

@@ -6,6 +6,7 @@ import { createBubbleBuffer, updateBubbles } from './gl/bubble-field.js';
 import { createFrameUniforms, updateFrameUniforms } from './gl/lighting.js';
 import { loadSky } from './sky/sky-data.js';
 import { createCelestial } from './sky/celestial.js';
+import { setClockHour } from './clock-label.js';
 
 /* ============================================================
    THE OCEAN — orchestrator
@@ -38,6 +39,11 @@ import { createCelestial } from './sky/celestial.js';
      the Sydney clock.
    - Reset restores every control to the default written in the
      HTML and resumes the animation.
+
+   Settings pill (clock-label.js):
+   - Its label shows state.dayTime, the time of day being rendered,
+     so it follows the Sydney clock, the time slider, Pause and
+     Reset together with the sky. Purely cosmetic.
 
    GPU budget:
    - A frame is only drawn when its inputs changed (clock, sliders,
@@ -172,6 +178,12 @@ export function initOcean(){
     ctrlTime.value = v;
   }
 
+  /* The Settings pill shows the time of day being rendered.
+     Writes only when the minute changes (clock-label.js). */
+  function syncClockLabel(){
+    setClockHour(state.dayTime);
+  }
+
   /* Sun and moon directions for the current instant and time of day */
   function updateSky(){
     celestial.write(state.now, state.dayTime, astro);
@@ -244,6 +256,7 @@ export function initOcean(){
     state.now = Date.now();
     state.dayTime = celestial.localHour(state.now);
     syncTimeSlider();
+    syncClockLabel();
   }
 
   /* Advance the animated state by dt seconds */
@@ -304,6 +317,9 @@ export function initOcean(){
     return running;
   }
 
+  /* The pill starts out showing the time the sky starts out at */
+  syncClockLabel();
+
   /* ---- sky data: Sydney sunrise / sunset and moon phases ---- */
   loadSky().then((data) => {
     if (data) celestial = createCelestial(data);
@@ -356,6 +372,7 @@ export function initOcean(){
       state.dayTime = parseFloat(e.target.value) / 100;
       ctrlTimeValue = Math.round(state.dayTime * 100);
       manualTimeOverride = true;
+      syncClockLabel();
       requestRedraw();
     });
   }
@@ -387,7 +404,7 @@ export function initOcean(){
       /* Resume first, so the reef slider eases back rather than snapping */
       setPaused(false);
 
-      /* Time of day: back to the Sydney clock */
+      /* Time of day: back to the Sydney clock (also resets the pill) */
       manualTimeOverride = false;
       followClock();
 

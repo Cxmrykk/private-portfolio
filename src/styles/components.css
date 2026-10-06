@@ -138,7 +138,8 @@ body.is-underwater .glass{
 
 /* Settings toggle: a real button with aria-expanded. Visually compact
    (32px); the ::after extends the hit area to 44px for touch without
-   changing the rect the glass pass draws from. */
+   changing the rect the glass pass draws from. Its label is the
+   Sydney clock (clock-label.js). */
 .sea-status{
   display:inline-flex; align-items:center; justify-content:center;
   width:auto; min-height:32px;
@@ -157,6 +158,10 @@ body.is-underwater .glass{
 .settings-hint{
   font:600 13px/1 "Segoe UI",Tahoma,sans-serif; letter-spacing:.01em;
   color:#e8f8ff; text-shadow:0 1px 3px rgba(0,0,0,0.7);
+  /* The label is a clock: equal-width digits keep the pill from
+     jittering as it ticks, and it must stay on one line */
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
 }
 
 .sea-panel{
