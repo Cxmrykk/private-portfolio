@@ -2,7 +2,7 @@
 # DEPLOY — builds the site, fetches Sydney's sky data, and
 # publishes both to GitHub Pages as one artifact.
 #
-# Runs on every push to main, every hour (sky.json refresh) and
+# Runs on every push to master, every hour (sky.json refresh) and
 # on demand. sky.json is never committed: it only exists in the
 # deployed artifact, next to index.html.
 #
@@ -12,7 +12,7 @@ name: Deploy site with sky data
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   schedule:
     # Hourly, a few minutes past the hour (the top of the hour is
     # the busiest slot for scheduled workflows and runs late most).
