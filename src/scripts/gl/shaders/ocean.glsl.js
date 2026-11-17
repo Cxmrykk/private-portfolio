@@ -29,6 +29,20 @@
        and shimmer at the branch edges and the horizon
    uSand is declared here, not in GLSL_COMMON, so the glass pass
    doesn't carry an unused sampler.
+
+   GPU cost (the image is unchanged by all of these):
+     - Wave directions advance by one fixed rotation per octave
+       instead of a cos + sin each.
+     - The ray marcher samples the surface through waveHeight(), a
+       height-only copy of the first five octaves of waveField()
+       (no gradient, no LOD: both were unused there).
+     - The march stops as soon as the surface is found to within
+       TRACE_EPS, and rays that stay above the tallest possible
+       wave skip it.
+     - The shallow floor (refraction, sand, caustics) is only
+       shaded while uShallow is actually blending it in.
+     - The light-shaft loop steps its depth falloff and drift with
+       recurrences instead of an exp / sin / cos per sample.
    ============================================================ */
 import { GLSL_COMMON } from './common.glsl.js';
 
@@ -54,6 +68,10 @@ ${GLSL_COMMON}
 #define SAND_VARIATION    0.35  // tiles per cell of the anti-repetition noise
 #define SHALLOW_FLOOR_Y  -1.6   // floor height under the surface, seen from above
 #define SHALLOW_SAND_GAIN 1.28  // the shallow floor was authored brighter
+
+/* Below this blend weight the shallow floor cannot change a pixel
+   by a visible amount, so it is not shaded at all. */
+#define SHALLOW_MIN       0.0005
 
 /* Average sand albedo the scene was tuned with; the photo's own mean
    is replaced by this, so only its detail comes through. */
@@ -111,11 +129,26 @@ void floorFootprints(vec3 ro, vec3 rd){
 }
 
 /* ---------- wave field ---------- */
+/* Each octave's direction is the previous one turned by the golden
+   angle (2.39996 rad): cos and sin of that angle. Rotating the
+   direction replaces a cos + sin per octave. */
+#define WAVE_ROT_C -0.737367
+#define WAVE_ROT_S  0.675492
+
+/* Bounds of waveHeight(): every octave's crest term lies in (0, 1],
+   so the five-octave height lies in (-0.55, 0.7262]. */
+#define WAVE_MIN -0.55
+#define WAVE_MAX  0.73
+
+/* The surface march stops once the ray is this close (world units,
+   vertically) to the water: far below a pixel at any distance. */
+#define TRACE_EPS 2.0e-4
+
 float waveField(vec2 p, float dist, int max_octaves, out vec2 grad){
   float h = 0.0;
   grad = vec2(0.0);
   float amp = 0.62, freq = 0.30, speed = 1.0, k = 1.60 * uChop;
-  float ang = 0.0;
+  vec2 d = vec2(1.0, 0.0);
   vec2 warp = vec2(0.0);
   
   // Standard linear LOD scaling
@@ -127,8 +160,7 @@ float waveField(vec2 p, float dist, int max_octaves, out vec2 grad){
     float lod = smoothstep(pixel_width, pixel_width * 3.5, wave_width);
     if (lod < 0.001) break;
 
-    ang += 2.39996;
-    vec2 d = vec2(cos(ang), sin(ang));
+    d = vec2(WAVE_ROT_C * d.x - WAVE_ROT_S * d.y, WAVE_ROT_S * d.x + WAVE_ROT_C * d.y);
     float ph = dot(p + warp, d) * freq + uTime * speed * freq * 2.4;
     float s  = sin(ph);
     float w  = exp(k * s - k);
@@ -143,25 +175,49 @@ float waveField(vec2 p, float dist, int max_octaves, out vec2 grad){
   return h * 0.80 - 0.55;
 }
 
-float waveHeight(vec2 p, int max_octaves){
-  vec2 g; return waveField(p, 0.0, max_octaves, g);
+/* Height only: the first five octaves of waveField() at full weight
+   (its LOD term is exactly 1 for them at dist = 0), without the
+   gradient. This is what the ray marchers sample. */
+float waveHeight(vec2 p){
+  float h = 0.0;
+  float amp = 0.62, freq = 0.30, speed = 1.0, k = 1.60 * uChop;
+  vec2 d = vec2(1.0, 0.0);
+  vec2 warp = vec2(0.0);
+
+  for (int i = 0; i < 5; i++){
+    d = vec2(WAVE_ROT_C * d.x - WAVE_ROT_S * d.y, WAVE_ROT_S * d.x + WAVE_ROT_C * d.y);
+    float ph = dot(p + warp, d) * freq + uTime * speed * freq * 2.4;
+    float w  = exp(k * sin(ph) - k);
+
+    h    += amp * w;
+    warp += d * w * amp * 0.38;
+    amp *= 0.66; freq *= 1.79; speed *= 1.06; k *= 0.93;
+  }
+  return h * 0.80 - 0.55;
 }
 
 /* ---------- ray marching ---------- */
-float traceOcean(vec3 ro, vec3 rd, out vec3 hitP){
+/* h0: waveHeight(ro.xz), the same for every pixel's ray origin */
+float traceOcean(vec3 ro, vec3 rd, float h0, out vec3 hitP){
   float tn = 0.0, tf = 300.0;
   hitP = ro;
   if (rd.y > 0.01 && ro.y > 0.5) return -1.0;
+
+  /* Still above the tallest possible wave at the far end: sky */
+  float yF = ro.y + rd.y * tf;
+  if (yF > WAVE_MAX) return -1.0;
+
   float tm = tn;
-  float dN = ro.y - waveHeight(ro.xz, 5);
-  float dF = (ro.y + rd.y * tf) - waveHeight((ro + rd * tf).xz, 5);
+  float dN = ro.y - h0;
+  float dF = yF - waveHeight((ro + rd * tf).xz);
   if (dF > 0.0) return -1.0;
 
   for (int i = 0; i < 11; i++){
     tm = mix(tn, tf, dN / (dN - dF));
     vec3 p = ro + rd * tm;
-    float d = p.y - waveHeight(p.xz, 5);
+    float d = p.y - waveHeight(p.xz);
     if (d < 0.0){ tf = tm; dF = d; } else { tn = tm; dN = d; }
+    if (abs(d) < TRACE_EPS) break;   // found the surface
   }
   hitP = ro + rd * tm;
   return tm;
@@ -171,7 +227,7 @@ float traceUnderside(vec3 ro, vec3 rd){
   float t = (0.0 - ro.y) / max(rd.y, 0.02);
   for (int i = 0; i < 4; i++){
     vec3 p = ro + rd * t;
-    float h = waveHeight(p.xz, 5);
+    float h = waveHeight(p.xz);
     t = max((h - ro.y) / max(rd.y, 0.02), 0.02);
   }
   return t;
@@ -210,23 +266,29 @@ vec3 shadeOcean(vec3 p, vec3 rd, vec3 n, float dist){
 
   float sss = pow(clamp(dot(n, getPrimaryLight()) * 0.5 + 0.5, 0.0, 1.0), 3.0) * crest;
   bodyDeep += sssCol * sss * lightI;
-
-  vec3 rdRefr = refract(rd, n, 1.0 / 1.333);
-  float tFloor = (SHALLOW_FLOOR_Y - p.y) / min(rdRefr.y, -0.01);
-  vec3 pFloor = p + rdRefr * tFloor;
-
-  float caustics = getCaustics(pFloor.xz);
-  vec3 sand = sandAlbedo(pFloor.xz, gFloorDx, gFloorDy) * SHALLOW_SAND_GAIN;
-  vec3 floorC = sand + vec3(1.0, 0.95, 0.8) * caustics * 2.0 * lightI;
-
-  float depthWalk = max(tFloor, 0.0);
-  vec3 extinction = exp(-vec3(0.8, 0.25, 0.05) * depthWalk);
-  
   bodyDeep *= lightI;
-  vec3 scatter = vec3(0.0, 0.4, 0.5) * (1.0 - extinction) * 0.3 * lightI;
-  vec3 bodyShallow = floorC * extinction + scatter;
 
-  vec3 body = mix(bodyDeep, bodyShallow, uShallow);
+  /* The shallow floor seen through the surface. Only shaded while
+     the Reef Proximity control is blending it in: at uShallow = 0
+     (the default) none of it reaches the screen. */
+  vec3 body = bodyDeep;
+  if (uShallow > SHALLOW_MIN){
+    vec3 rdRefr = refract(rd, n, 1.0 / 1.333);
+    float tFloor = (SHALLOW_FLOOR_Y - p.y) / min(rdRefr.y, -0.01);
+    vec3 pFloor = p + rdRefr * tFloor;
+
+    float caustics = getCaustics(pFloor.xz);
+    vec3 sand = sandAlbedo(pFloor.xz, gFloorDx, gFloorDy) * SHALLOW_SAND_GAIN;
+    vec3 floorC = sand + vec3(1.0, 0.95, 0.8) * caustics * 2.0 * lightI;
+
+    float depthWalk = max(tFloor, 0.0);
+    vec3 extinction = exp(-vec3(0.8, 0.25, 0.05) * depthWalk);
+
+    vec3 scatter = vec3(0.0, 0.4, 0.5) * (1.0 - extinction) * 0.3 * lightI;
+    vec3 bodyShallow = floorC * extinction + scatter;
+
+    body = mix(bodyDeep, bodyShallow, uShallow);
+  }
 
   vec3 hv = normalize(getPrimaryLight() - rd);
   float specMain = pow(clamp(dot(n, hv), 0.0, 1.0), 350.0) * 3.5 * lightI;
@@ -385,14 +447,37 @@ vec3 renderUnder(vec3 ro, vec3 rd){
   // 10 volumetric steps for smooth rendering and to prevent Moire banding
   float segLen = min(td, 60.0) / 10.0;
   vec3 sDir = getShaftDir();
+  vec2 sSlope = sDir.xz / sDir.y;
+
+  /* The samples are evenly spaced along the ray, so their depth
+     changes by a fixed step. Everything that depends only on depth
+     is stepped with a recurrence instead of being re-evaluated:
+       falloff  exp(y * 0.08)            -> multiply by a constant
+       drift    sin / cos(y * 0.15 + c)  -> rotate by a fixed angle
+     Same values as evaluating them per sample (to float rounding). */
+  float yStep = rd.y * segLen;
+  float y0    = ro.y + yStep * dith;
+  float wgt   = exp(y0 * 0.08);
+  float wMul  = exp(yStep * 0.08);
+
+  float a0 = y0 * 0.15 + uTime * 0.4;
+  float b0 = y0 * 0.15 + uTime * 0.3;
+  vec2  dA = vec2(sin(a0), cos(a0));          // drift.x uses the sine
+  vec2  dB = vec2(sin(b0), cos(b0));          // drift.y uses the cosine
+  vec2  turn = vec2(cos(yStep * 0.15), sin(yStep * 0.15));
   
   for (int i = 0; i < 10; i++){
     vec3 sp = ro + rd * (segLen * (float(i) + dith));
-    if (sp.y > -0.15) continue;
-    
-    vec3 q = sp + sDir * ((0.0 - sp.y) / sDir.y);
-    vec2 drift = vec2(sin(sp.y * 0.15 + uTime * 0.4), cos(sp.y * 0.15 + uTime * 0.3)) * 0.6;
-    shaft += getCaustics(q.xz * 0.15 + drift) * exp(sp.y * 0.08);
+    if (sp.y <= -0.15){
+      vec2 q = sp.xz - sSlope * sp.y;
+      vec2 drift = vec2(dA.x, dB.y) * 0.6;
+      shaft += getCaustics(q * 0.15 + drift) * wgt;
+    }
+
+    /* advance to the next sample's depth */
+    wgt *= wMul;
+    dA = vec2(dA.x * turn.x + dA.y * turn.y, dA.y * turn.x - dA.x * turn.y);
+    dB = vec2(dB.x * turn.x + dB.y * turn.y, dB.y * turn.x - dB.x * turn.y);
   }
   shaft /= 10.0;
   float toSun = clamp(dot(rd, sDir), 0.0, 1.0);
@@ -420,11 +505,22 @@ void main(){
      taken in uniform control flow. */
   floorFootprints(ro, rd);
 
+  /* Is the camera under the surface? Below the lowest possible wave
+     it certainly is, and the surface need not be sampled. Otherwise
+     the height above the camera decides, and the surface march
+     reuses it as its starting value. */
+  float h0 = 0.0;
+  bool under = ro.y < WAVE_MIN - 0.02;
+  if (!under){
+    h0 = waveHeight(ro.xz);
+    under = ro.y < h0 - 0.02;
+  }
+
   vec3 col;
-  if (ro.y < waveHeight(ro.xz, 5) - 0.02){
+  if (under){
     col = renderUnder(ro, rd);
   } else {
-    vec3 p; float t = traceOcean(ro, rd, p);
+    vec3 p; float t = traceOcean(ro, rd, h0, p);
     if (t < 0.0){
       col = sky(rd, true); // Direct sky view, full clouds rendered
     } else {

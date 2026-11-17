@@ -17,6 +17,23 @@
    set up lazily, on the first panel whose reach covers the pixel.
    On the base canvas most pixels touch no panel and now only pay
    for the ocean fetch and the cursor glow.
+
+   Flat faces: most of a panel is its flat face (bevel coordinate
+   s == 0), where the bevel terms are exactly zero. There:
+     - the refraction offset is zero, so the three chromatic taps
+       and the reference tap all land on the same texel: one fetch
+     - the specular lobes, absorption band, rim glow and silhouette
+       line contribute nothing and are skipped
+   The cast shadow is likewise skipped for pixels fully inside the
+   panel (its weight there is zero), and the environment reflection
+   skips the sky once the dive has faded it out completely.
+   None of this changes the image.
+
+   uOceanLod: the ocean texture may be smaller than this canvas
+   (the UI canvas renders its ocean at the base canvas's density,
+   see renderer.js). It is log2(texture size / canvas size), <= 0,
+   added to every blurred lookup so frost and reflections keep the
+   same blur on screen. 0 when the sizes match.
    ============================================================ */
 import { GLSL_COMMON } from './common.glsl.js';
 import { GLSL_GLINT } from './glint.glsl.js';
@@ -35,6 +52,7 @@ uniform float uDive;
 uniform float uShallow;     // seabed depth (shared GLSL)
 uniform int   uLayerRender; // 0 = base layer, 1 = UI layer
 uniform sampler2D uOcean;
+uniform float uOceanLod;    // log2(ocean texture size / canvas size), <= 0
 
 #define MAX_GLASS 60
 #define IOR 1.52            // crown glass
@@ -71,13 +89,17 @@ vec2 lightScreenPos(float d){
 float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
 
 vec3 envReflect(vec3 R, float dive){
+  vec3 below = mix(vec3(0.10, 0.20, 0.26), vec3(0.70, 0.88, 0.94), clamp(R.y * 0.6 + 0.5, 0.0, 1.0));
+  below = mix(vec3(luma(below)), below, 0.45);
+
+  /* Fully under water the sky has faded out of the reflection */
+  if (dive >= 1.0) return below;
+
   vec3 skyC = sky(normalize(vec3(R.x * 0.9, max(R.y, 0.0) * 0.85 + 0.06, -0.5)), false);
   skyC = pow(1.0 - exp(-skyC * 1.28), vec3(0.86));
   vec3 up    = mix(vec3(luma(skyC)), skyC, 0.30);
   vec3 down  = mix(vec3(0.22, 0.26, 0.30), vec3(0.62, 0.68, 0.74), clamp(R.y + 1.0, 0.0, 1.0));
   vec3 above = mix(down, up, smoothstep(-0.30, 0.15, R.y));
-  vec3 below = mix(vec3(0.10, 0.20, 0.26), vec3(0.70, 0.88, 0.94), clamp(R.y * 0.6 + 0.5, 0.0, 1.0));
-  below = mix(vec3(luma(below)), below, 0.45);
   return mix(above, below, dive);
 }
 
@@ -237,7 +259,9 @@ void main(){
     float lI   = lightI;
     float bev  = clamp(min(hs.x, hs.y) * bevK, 6.0 * uPx, 30.0 * uPx);
 
-    if (shadowW > 0.0){
+    /* Cast shadow and focused rim light fall outside the panel only:
+       fully inside it (inside == 1) their weight is zero. */
+    if (shadowW > 0.0 && inside < 1.0){
       vec2  gS; float dS = sdRect(p + L2 * 3.0 * uPx, hs, r, gS);
       float outsideW = op * (1.0 - inside);
       float shadow = (1.0 - smoothstep(-1.0, shadowReach, dS)) * shadowW * outsideW;
@@ -252,6 +276,11 @@ void main(){
 
     float s    = smoothstep(-bev, 0.0, dist);
     float face = 1.0 - s;
+
+    /* s is exactly 0 across the flat face; every bevel-only term
+       below is exactly zero there and is skipped. */
+    bool  bevel = s > 0.0;
+
     float sI   = min(s, 0.985);
     float cI   = sqrt(1.0 - sI * sI);
     vec3  N    = vec3(grad * sI, cI);
@@ -266,12 +295,17 @@ void main(){
     float disp  = 0.05 * s * (0.4 + 0.6 * facing);             
     vec2  base  = (center + p * 0.96) * texel;                  
     vec2  refr  = -grad * shift * texel;
-    float lod   = tintFrostLod(frostLod, tk) * face;
+    float lod   = max(tintFrostLod(frostLod, tk) * face + uOceanLod, 0.0);
 
-    vec3 rimS = vec3(textureLod(uOcean, base + refr * (1.0 - disp), lod).r,
-                     textureLod(uOcean, base + refr,                lod).g,
-                     textureLod(uOcean, base + refr * (1.0 + disp), lod).b);
+    /* On the flat face the refraction offset is zero, so the three
+       chromatic taps coincide with the reference tap: one fetch. */
     vec3 rim0 = textureLod(uOcean, base, lod).rgb;
+    vec3 rimS = rim0;
+    if (bevel){
+      rimS = vec3(textureLod(uOcean, base + refr * (1.0 - disp), lod).r,
+                  textureLod(uOcean, base + refr,                lod).g,
+                  textureLod(uOcean, base + refr * (1.0 + disp), lod).b);
+    }
     vec3 bg = mix(rimS, col + (rimS - rim0), covered);
 
     float wT = tintW, wO = (1.0 - tintW) * oShare;
@@ -279,7 +313,7 @@ void main(){
     vec3  body = (tint * wT + bg * wO) / srcA;
 
     body = mix(body, (body - 0.5) * 1.08 + 0.5, face * (1.0 - tintW));
-    body *= pow(vec3(0.975, 1.0, 1.0), vec3(3.0 * s * s));
+    if (bevel) body *= pow(vec3(0.975, 1.0, 1.0), vec3(3.0 * s * s));
 
     /* dyed glass: colourised face, in-scatter glow, absorbing bevels */
     body = tintBody(body, dye, tk, face, s, sT, lI);
@@ -289,31 +323,39 @@ void main(){
     body += hiCol * sheen;
     body += hiCol * dapple * 0.06 * diveFade * face;
 
-    float band = smoothstep(0.12, 0.50, s) * (1.0 - smoothstep(0.50, 0.92, s));
-    body *= 1.0 - band * 0.16 * (1.0 - 0.5 * facing);
+    if (bevel){
+      float band = smoothstep(0.12, 0.50, s) * (1.0 - smoothstep(0.50, 0.92, s));
+      body *= 1.0 - band * 0.16 * (1.0 - 0.5 * facing);
+    }
 
     vec3  R = reflect(-V, N);
     vec3  env = envReflect(R, diveFade);
     if (uLayerRender == 0){
-      vec3 ssr = textureLod(uOcean, clamp(fc * texel + R.xy * 0.10, 0.0, 1.0), 1.5).rgb;
+      vec3 ssr = textureLod(uOcean, clamp(fc * texel + R.xy * 0.10, 0.0, 1.0), max(1.5 + uOceanLod, 0.0)).rgb;
       env = mix(env, ssr, 0.25);
     }
     body = mix(body, env, fres);
 
-    float rimGlow = smoothstep(0.62, 0.97, s);
-    vec3  rimC = tintRim(mix(env, hiCol, 0.45 * facing * (0.5 + 0.5 * lI)), dye, tk);
-    body = mix(body, rimC, rimGlow * 0.60);
+    float specL = 0.0;
+    float specC = 0.0;
 
-    float sil = exp(-pow((dist + 0.5 * uPx) / (0.8 * uPx), 2.0));
-    body *= 1.0 - sil * 0.18;
+    if (bevel){
+      float rimGlow = smoothstep(0.62, 0.97, s);
+      vec3  rimC = tintRim(mix(env, hiCol, 0.45 * facing * (0.5 + 0.5 * lI)), dye, tk);
+      body = mix(body, rimC, rimGlow * 0.60);
 
-    float ndh   = clamp(dot(N, Hsun),  0.0, 1.0);
-    float ndh2  = clamp(dot(N, Hsun2), 0.0, 1.0);
-    float specS = (pow(ndh, 90.0) * 1.10 + pow(ndh, 12.0) * 0.22 + pow(ndh, 3.0) * 0.06) * s;
-    float specB = (pow(ndh2, 60.0) * 0.30 + pow(ndh2, 10.0) * 0.06) * s;
-    float specL = (specS + specB) * lI * (0.45 + 0.55 * sunNear);
+      float sil = exp(-pow((dist + 0.5 * uPx) / (0.8 * uPx), 2.0));
+      body *= 1.0 - sil * 0.18;
 
-    float specC   = pow(clamp(dot(N, Hc), 0.0, 1.0), 40.0) * 0.50 * curW * s;
+      float ndh   = clamp(dot(N, Hsun),  0.0, 1.0);
+      float ndh2  = clamp(dot(N, Hsun2), 0.0, 1.0);
+      float specS = (pow(ndh, 90.0) * 1.10 + pow(ndh, 12.0) * 0.22 + pow(ndh, 3.0) * 0.06) * s;
+      float specB = (pow(ndh2, 60.0) * 0.30 + pow(ndh2, 10.0) * 0.06) * s;
+      specL = (specS + specB) * lI * (0.45 + 0.55 * sunNear);
+
+      specC = pow(clamp(dot(N, Hc), 0.0, 1.0), 40.0) * 0.50 * curW * s;
+    }
+
     float curFace = curW * 0.10 * face;
 
     vec3  spec = hiCol * (specL + specC) + vec3(1.0) * curFace;

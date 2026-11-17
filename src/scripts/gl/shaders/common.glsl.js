@@ -5,8 +5,13 @@
 
    Per-frame constants (phase of day, light directions and
    colours, camera) are uniforms computed once per frame on the
-   CPU (gl/lighting.js, gl/camera.js). The helper functions keep
-   their names and meaning, so the passes read them as before.
+   CPU (gl/lighting.js). The helper functions keep their names
+   and meaning, so the passes read them as before.
+
+   sky() skips the sun terms whose phase weight is zero (all of
+   them at night, the hard core outside the day, the stretched
+   burn outside sunset). The weights are uniforms, so the branches
+   are the same for every pixel and the result is unchanged.
 
    GLSL_COMMON declares its own uniforms (below) and expects the
    including shader to declare, before the chunk is inserted:
@@ -209,19 +214,30 @@ vec3 sky(vec3 rd, bool renderClouds){
   baseSky = mix(baseSky, zenith, smoothstep(0.15, 1.0, hF));
   vec3 col = baseSky;
 
-  // Sun rendering - Traditional core
+  // Sun rendering. Every term is scaled by a phase weight; the ones
+  // whose weight is zero right now are skipped (same result).
   float sd = max(dot(rd, sunDir), 0.0);
-  vec3 sunHalo = vec3(1.00, 0.88, 0.66) * pow(sd, 1200.0) * 14.0 * dayW;
-  sunHalo += vec3(1.00, 0.80, 0.52) * pow(sd, 22.0) * 0.38 * (dayW + sunsetW);
-  sunHalo += vec3(0.95, 0.80, 0.60) * pow(sd, 3.0)  * 0.06 * (dayW + sunsetW);
+  float litW = dayW + sunsetW;
+  vec3 sunHalo = vec3(0.0);
 
-  // Sun rendering - Sunset atmospheric horizontal stretching / bleeding
-  vec3 squashRd = normalize(vec3(rd.x, rd.y * 3.5, rd.z));
-  vec3 squashSun = normalize(vec3(sunDir.x, sunDir.y * 3.5, sunDir.z));
-  float sdStretch = max(dot(squashRd, squashSun), 0.0);
-  
-  sunHalo += vec3(1.00, 0.35, 0.10) * pow(sdStretch, 120.0) * 8.0 * sunsetW; // Wide red/orange burn
-  sunHalo += vec3(1.00, 0.80, 0.40) * pow(sdStretch, 350.0) * 3.0 * sunsetW; // Wide bright core
+  if (litW > 0.0){
+    // Traditional core
+    if (dayW > 0.0){
+      sunHalo += vec3(1.00, 0.88, 0.66) * pow(sd, 1200.0) * 14.0 * dayW;
+    }
+    sunHalo += vec3(1.00, 0.80, 0.52) * pow(sd, 22.0) * 0.38 * litW;
+    sunHalo += vec3(0.95, 0.80, 0.60) * pow(sd, 3.0)  * 0.06 * litW;
+
+    // Sunset atmospheric horizontal stretching / bleeding
+    if (sunsetW > 0.0){
+      vec3 squashRd = normalize(vec3(rd.x, rd.y * 3.5, rd.z));
+      vec3 squashSun = normalize(vec3(sunDir.x, sunDir.y * 3.5, sunDir.z));
+      float sdStretch = max(dot(squashRd, squashSun), 0.0);
+
+      sunHalo += vec3(1.00, 0.35, 0.10) * pow(sdStretch, 120.0) * 8.0 * sunsetW; // Wide red/orange burn
+      sunHalo += vec3(1.00, 0.80, 0.40) * pow(sdStretch, 350.0) * 3.0 * sunsetW; // Wide bright core
+    }
+  }
   col += sunHalo;
 
   // Moon rendering (Frutiger Aero Stylized: Glowing, glassy, pristine orb)

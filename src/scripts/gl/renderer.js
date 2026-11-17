@@ -38,6 +38,10 @@
    - The CSS box is tracked with a ResizeObserver instead of being
      read each frame, so drawing never forces a synchronous layout.
      opts.onResize is called when it changes.
+   - The ocean texture has its own size (ow x oh), which equals the
+     drawing buffer on both canvases. The glass pass samples it
+     through normalised coordinates, so the two could differ; see
+     UI_OCEAN_MATCH_BASE for why they do not.
 
    Assets:
    - opts.onAssetReady is called once the sand image has been
@@ -77,6 +81,25 @@ const SCISSOR_MARGIN = 28;
    kicks in on large / high-DPI screens. */
 const BASE_MAX_PIXELS = 1920 * 1080;
 
+/* The UI canvas renders its own copy of the ocean behind its panels
+   (textures cannot be shared between the two contexts). Turning this
+   on renders that copy at the base canvas's lower pixel density
+   instead of the UI canvas's own.
+
+   Left OFF: it is cheaper, but it shows. The glass does not display
+   the ocean texture 1:1. The bevels magnify it several times (the
+   refraction offset reaches ~2.5x the bevel width, and at rounded
+   corners the samples converge on a point), so coarser texels become
+   visible blocks along the rims: steps on the header's corners and
+   across the settings panel's wide bevels. The UI's ocean therefore
+   needs the UI canvas's full density. */
+const UI_OCEAN_MATCH_BASE = false;
+
+/* Device pixels per CSS pixel the base canvas last rendered at.
+   Published by the base renderer each time it draws; only read by
+   the UI renderer when UI_OCEAN_MATCH_BASE is on. */
+let baseDensity = 0;
+
 /* Three vec4 arrays of MAX_GLASS (rects, params, tints) plus the
    scalar and per-frame uniforms. WebGL2 only guarantees 224
    fragment vectors. */
@@ -105,8 +128,8 @@ const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow
                         'uSand', 'uSandMean', ...FRAME_UNIFORMS];
 const BUBBLE_UNIFORMS = ['uRes', 'uTime', 'uWarp', 'uAmount', 'uCamPitch', 'uPhase'];
 const GLASS_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uCursor', 'uPx', 'uScroll', 'uDive', 'uShallow',
-                        'uLayerRender', 'uOcean', 'uGlassCount', 'uGlassRects', 'uGlassParams',
-                        'uGlassTints', ...FRAME_UNIFORMS];
+                        'uLayerRender', 'uOcean', 'uOceanLod', 'uGlassCount', 'uGlassRects',
+                        'uGlassParams', 'uGlassTints', ...FRAME_UNIFORMS];
 
 function compileShader(gl, type, src){
   const sh = gl.createShader(type);
@@ -231,6 +254,9 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, OCEAN_MAX_LEVEL);
   const fbo = gl.createFramebuffer();
 
+  /* Current size of the ocean texture (0 until first allocated) */
+  let texW = 0, texH = 0;
+
   /* ---- sand albedo (unit 1): fallback now, the photo once decoded ---- */
   const sand = createSandTexture(gl, onAssetReady);
 
@@ -242,7 +268,12 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   const rectsData  = new Float32Array(MAX_GLASS * 4);
   const paramsData = new Float32Array(MAX_GLASS * 4);
   const tintsData  = new Float32Array(MAX_GLASS * 4); // dye r, g, b, strength
+
+  /* UI canvas: one scissor box per panel, in canvas pixels (glass
+     pass) and in ocean-texture pixels (ocean and bubble passes).
+     The two are the same boxes while the texture matches the canvas. */
   const scissors = [];
+  const oceanScissors = [];
   let scissorCount = 0;
 
   /* Instances drawn by drawBubbleQuads() */
@@ -287,25 +318,36 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     return [Math.max(1, Math.round(w)), Math.max(1, Math.round(h))];
   }
 
-  function resize(w, h){
-    if (canvas.width === w && canvas.height === h) return;
-    canvas.width = w; canvas.height = h;
+  /* w, h: drawing buffer. ow, oh: ocean texture. */
+  function resize(w, h, ow, oh){
+    if (canvas.width !== w || canvas.height !== h){
+      canvas.width = w; canvas.height = h;
+    }
+    if (texW === ow && texH === oh) return;
+    texW = ow; texH = oh;
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, ow, oh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
   /* Packs visible panels into the uniform arrays.
+     rx, ry: ocean-texture pixels per canvas pixel (<= 1).
      Returns { count, needsMips }: needsMips is true when any packed
      panel samples a blurred mip level (see glass.glsl.js material()
      and tintFrostLod()). */
-  function pack(items, h, sx, sy){
+  function pack(items, h, sx, sy, rx, ry){
     let count = 0;
     let needsMips = !isUI; // base layer's screen-space reflection reads LOD 1.5
     scissorCount = 0;
+
+    /* A smaller ocean texture is magnified with bilinear filtering,
+       which reads one texel beyond the sample point: render one more
+       texel around each box so that neighbour is always valid. */
+    const pad = (rx < 1 || ry < 1) ? 1 : 0;
+
     for (const it of items){
       if (count >= MAX_GLASS) break;
       const { rect, op, tint, type, radius } = it;
@@ -342,6 +384,17 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
         s[1] = Math.floor(rectsData[i + 1] - m);
         s[2] = Math.ceil(rectsData[i + 2] + 2 * m);
         s[3] = Math.ceil(rectsData[i + 3] + 2 * m);
+
+        /* The same box in ocean-texture pixels */
+        let o = oceanScissors[scissorCount];
+        if (!o) o = oceanScissors[scissorCount] = [0, 0, 0, 0];
+        const x0 = Math.floor(s[0] * rx) - pad;
+        const y0 = Math.floor(s[1] * ry) - pad;
+        o[0] = x0;
+        o[1] = y0;
+        o[2] = Math.ceil((s[0] + s[2]) * rx) + pad - x0;
+        o[3] = Math.ceil((s[1] + s[3]) * ry) + pad - y0;
+
         scissorCount++;
       }
       count++;
@@ -359,13 +412,13 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, bubbleInstances);
   }
 
-  /* Runs a draw call over the whole canvas; on the UI canvas, once
-     per panel scissor instead. */
-  function drawScissored(drawCall){
+  /* Runs a draw call over the whole target; on the UI canvas, once
+     per panel scissor box in `boxes` instead. */
+  function drawScissored(drawCall, boxes){
     if (isUI){
       gl.enable(gl.SCISSOR_TEST);
       for (let i = 0; i < scissorCount; i++){
-        const s = scissors[i];
+        const s = boxes[i];
         gl.scissor(s[0], s[1], s[2], s[3]);
         drawCall();
       }
@@ -376,8 +429,8 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   }
 
   /* Pass 1b: bubbles blended over the ocean, into the bound ocean
-     framebuffer. Each bubble shades only its own bounding quad. */
-  function drawBubbles(state, w, h){
+     framebuffer (ow x oh). Each bubble shades only its own bounding quad. */
+  function drawBubbles(state, ow, oh){
     const d = clamp(state.dive, 0, 1);
     const amount = smoothstep(0.10, 0.32, d);
     bubbleInstances = state.bubbleCount;
@@ -385,7 +438,7 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     if (isUI && scissorCount === 0) return;
 
     gl.useProgram(bubbles.prog);
-    gl.uniform2f(bubbles.u.uRes, w, h);
+    gl.uniform2f(bubbles.u.uRes, ow, oh);
     gl.uniform1f(bubbles.u.uTime, state.clock);
     gl.uniform1f(bubbles.u.uWarp, BUBBLE_WARP * smoothstep(0.15, 0.60, d));
     gl.uniform1f(bubbles.u.uAmount, amount);
@@ -400,7 +453,7 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
        The target's own alpha is left untouched. */
     gl.enable(gl.BLEND);
     gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
-    drawScissored(drawBubbleQuads);
+    drawScissored(drawBubbleQuads, oceanScissors);
     gl.disable(gl.BLEND);
 
     gl.bindVertexArray(fullscreenVao);
@@ -431,15 +484,28 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     if (status() !== 'ready') return false;
 
     const [w, h] = bufferSize(dpr);
-    resize(w, h);
     const sx = w / cssW, sy = h / cssH;
-    const { count, needsMips } = pack(items, h, sx, sy);
+
+    /* Ocean texture size: the drawing buffer. (With
+       UI_OCEAN_MATCH_BASE on, the UI canvas would use the base
+       canvas's lower density instead; see the note on that constant.) */
+    let ow = w, oh = h;
+    if (!isUI){
+      baseDensity = sx;
+    } else if (UI_OCEAN_MATCH_BASE && baseDensity > 0 && baseDensity < sx){
+      const r = baseDensity / sx;
+      ow = Math.max(1, Math.round(w * r));
+      oh = Math.max(1, Math.round(h * r));
+    }
+
+    resize(w, h, ow, oh);
+    const { count, needsMips } = pack(items, h, sx, sy, ow / w, oh / h);
 
     /* ---- pass 1: ocean into the texture ---- */
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.viewport(0, 0, w, h);
+    gl.viewport(0, 0, ow, oh);
     gl.useProgram(ocean.prog);
-    gl.uniform2f(ocean.u.uRes, w, h);
+    gl.uniform2f(ocean.u.uRes, ow, oh);
     gl.uniform1f(ocean.u.uTime, state.clock);
     gl.uniform2f(ocean.u.uMouse, state.mouseX, state.mouseY);
     gl.uniform1f(ocean.u.uScroll, state.scroll);
@@ -460,10 +526,10 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
-    drawScissored(drawTriangle);
+    drawScissored(drawTriangle, oceanScissors);
 
     /* ---- pass 1b: bubbles over the ocean, same texture ---- */
-    drawBubbles(state, w, h);
+    drawBubbles(state, ow, oh);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     prepareOceanTexture(needsMips);
@@ -494,10 +560,14 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform1i(glass.u.uOcean, 0);
 
+    /* Blurred lookups are authored in canvas pixels; shift them by the
+       ocean texture's size relative to the canvas (0 when equal). */
+    gl.uniform1f(glass.u.uOceanLod, Math.log2(ow / w));
+
     /* UI layer: the shader discards everything farther than 28 px from a
        panel, so scissoring to the same margin gives identical output
        without running the fragment shader over the rest of the screen. */
-    drawScissored(drawTriangle);
+    drawScissored(drawTriangle, scissors);
     return true;
   }
 
