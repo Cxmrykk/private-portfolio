@@ -1,8 +1,11 @@
 /* ============================================================
-   RENDERER — one WebGL2 context, two passes
-   Pass 1: ocean → framebuffer texture (+ mipmaps for frost)
-   Pass 2: glass composite → canvas, sampling that texture
-   On the UI canvas both passes are scissored to the panels
+   RENDERER — one WebGL2 context, three draws
+   Pass 1:  ocean → framebuffer texture
+   Pass 1b: bubbles → the same texture, one instanced quad per
+            bubble, blended over the ocean (bubbles.glsl.js)
+            (+ mipmaps for frost)
+   Pass 2:  glass composite → canvas, sampling that texture
+   On the UI canvas every pass is scissored to the panels
    (plus their shadow / refraction margin); everything outside
    is transparent, so no fragments are spent there.
 
@@ -19,6 +22,12 @@
    - Unit 1: the sand albedo (sampled by the ocean pass; see
      sand-texture.js). TEXTURE0 is always left active, so every
      bind of the ocean texture lands on unit 0.
+
+   Vertex arrays:
+   - The full-screen passes use an empty vertex array (the triangle
+     comes from gl_VertexID) and it is the one left bound.
+   - The bubble pass has its own, holding the per-instance buffer;
+     it is bound only around that draw.
 
    Sizing:
    - The drawing buffer follows the canvas's own CSS box, not the
@@ -38,18 +47,23 @@
    GPU budget:
    - The base canvas is capped to a pixel budget (BASE_MAX_PIXELS)
      so very large / high-DPI screens don't render 4+ MP per pass.
+   - Bubbles only shade the pixels inside their own bounding quads,
+     and the pass is skipped while none are visible (above water).
    - Mipmaps are only rebuilt when a panel on this canvas actually
      samples a blurred level (gel buttons, dyed panels, or the base
      layer's screen-space reflection), and only up to the deepest
      level anything samples (OCEAN_MAX_LEVEL). Otherwise the texture
      uses plain LINEAR filtering and the mip chain is skipped.
    - Per-frame constants (lighting, camera) arrive in state.frame
-     (see lighting.js) and bubble positions in state.bubbles /
+     (see lighting.js) and bubble instances in state.bubbles /
      state.bubbleCount (see bubble-field.js), shared by both canvases.
    ============================================================ */
 import { FULLSCREEN_VERT } from './shaders/common.glsl.js';
 import { OCEAN_FRAG } from './shaders/ocean.glsl.js';
 import { GLASS_FRAG } from './shaders/glass.glsl.js';
+import { BUBBLE_VERT, BUBBLE_FRAG } from './shaders/bubbles.glsl.js';
+import { BUBBLE_COUNT, BUBBLE_STRIDE } from './bubble-field.js';
+import { clamp, smoothstep } from './camera.js';
 import { createSandTexture } from './sand-texture.js';
 
 export const MAX_GLASS = 60;
@@ -76,12 +90,20 @@ const SAND_UNIT = 1;
    0..2 cover every lookup exactly. */
 const OCEAN_MAX_LEVEL = 2;
 
+/* Bubble pass. Must match the ocean pass (ocean.glsl.js main()):
+   the underwater uv shimmer amplitude, and the dive range over
+   which the bubbles fade in. */
+const BUBBLE_WARP = 0.0045;
+const BUBBLE_MIN_AMOUNT = 0.001;
+const BUBBLE_BYTES = BUBBLE_STRIDE * Float32Array.BYTES_PER_ELEMENT;
+
 /* Per-frame constants shared by both passes (GLSL_COMMON) */
 const FRAME_UNIFORMS = ['uSunDir', 'uMoonDir', 'uPhase', 'uPrimaryDir', 'uShaftDir', 'uPrimaryCol',
                         'uEnvLight', 'uSkyAmbient', 'uCamOrigin', 'uCamPitch', 'uSubmergence'];
 
 const OCEAN_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uScroll', 'uChop', 'uShallow', 'uDive',
-                        'uBubbles', 'uBubbleCount', 'uSand', 'uSandMean', ...FRAME_UNIFORMS];
+                        'uSand', 'uSandMean', ...FRAME_UNIFORMS];
+const BUBBLE_UNIFORMS = ['uRes', 'uTime', 'uWarp', 'uAmount', 'uCamPitch', 'uPhase'];
 const GLASS_UNIFORMS = ['uRes', 'uTime', 'uMouse', 'uCursor', 'uPx', 'uScroll', 'uDive', 'uShallow',
                         'uLayerRender', 'uOcean', 'uGlassCount', 'uGlassRects', 'uGlassParams',
                         'uGlassTints', ...FRAME_UNIFORMS];
@@ -158,23 +180,45 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   /* ---- programs: compiled in the background where supported ---- */
   const parallel = gl.getExtension('KHR_parallel_shader_compile');
   const vs = compileShader(gl, gl.VERTEX_SHADER, FULLSCREEN_VERT);
+  const bubbleVs = compileShader(gl, gl.VERTEX_SHADER, BUBBLE_VERT);
   const pendingOcean = startProgram(gl, vs, OCEAN_FRAG);
+  const pendingBubbles = startProgram(gl, bubbleVs, BUBBLE_FRAG);
   const pendingGlass = startProgram(gl, vs, GLASS_FRAG);
-  let ocean = null, glass = null;
+  let ocean = null, bubbles = null, glass = null;
   let programState = 'pending';
 
   function status(){
     if (programState !== 'pending') return programState;
     if (gl.isContextLost()) return programState;
-    if (!linkComplete(gl, parallel, pendingOcean) || !linkComplete(gl, parallel, pendingGlass)) return programState;
+    if (!linkComplete(gl, parallel, pendingOcean) ||
+        !linkComplete(gl, parallel, pendingBubbles) ||
+        !linkComplete(gl, parallel, pendingGlass)) return programState;
 
     ocean = finishProgram(gl, pendingOcean, OCEAN_UNIFORMS);
+    bubbles = finishProgram(gl, pendingBubbles, BUBBLE_UNIFORMS);
     glass = finishProgram(gl, pendingGlass, GLASS_UNIFORMS);
-    programState = (ocean && glass) ? 'ready' : 'failed';
+    programState = (ocean && bubbles && glass) ? 'ready' : 'failed';
     return programState;
   }
 
-  gl.bindVertexArray(gl.createVertexArray());
+  /* ---- vertex arrays ----
+     Bubbles: one instance = BUBBLE_STRIDE floats (bubble-field.js);
+     attribute 0 = aBubble, 1 = aRect (bubbles.glsl.js). */
+  const fullscreenVao = gl.createVertexArray();
+  const bubbleVao = gl.createVertexArray();
+  const bubbleBuf = gl.createBuffer();
+
+  gl.bindVertexArray(bubbleVao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bubbleBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, BUBBLE_COUNT * BUBBLE_BYTES, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 4, gl.FLOAT, false, BUBBLE_BYTES, 0);
+  gl.vertexAttribDivisor(0, 1);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribPointer(1, 4, gl.FLOAT, false, BUBBLE_BYTES, 16);
+  gl.vertexAttribDivisor(1, 1);
+
+  gl.bindVertexArray(fullscreenVao);
 
   /* ---- ocean render target (unit 0) ---- */
   gl.activeTexture(gl.TEXTURE0);
@@ -200,6 +244,9 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
   const tintsData  = new Float32Array(MAX_GLASS * 4); // dye r, g, b, strength
   const scissors = [];
   let scissorCount = 0;
+
+  /* Instances drawn by drawBubbleQuads() */
+  let bubbleInstances = 0;
 
   /* ---- CSS box of the canvas ----
      Panel rects (viewport CSS px) map onto the buffer through this box.
@@ -302,19 +349,61 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     return { count, needsMips };
   }
 
-  /* Full-screen triangle; on the UI canvas, only inside the panel scissors */
-  function drawFullscreen(){
+  /* Full-screen triangle (empty vertex array bound) */
+  function drawTriangle(){
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /* One quad per visible bubble (bubble vertex array bound) */
+  function drawBubbleQuads(){
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, bubbleInstances);
+  }
+
+  /* Runs a draw call over the whole canvas; on the UI canvas, once
+     per panel scissor instead. */
+  function drawScissored(drawCall){
     if (isUI){
       gl.enable(gl.SCISSOR_TEST);
       for (let i = 0; i < scissorCount; i++){
         const s = scissors[i];
         gl.scissor(s[0], s[1], s[2], s[3]);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        drawCall();
       }
       gl.disable(gl.SCISSOR_TEST);
     } else {
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      drawCall();
     }
+  }
+
+  /* Pass 1b: bubbles blended over the ocean, into the bound ocean
+     framebuffer. Each bubble shades only its own bounding quad. */
+  function drawBubbles(state, w, h){
+    const d = clamp(state.dive, 0, 1);
+    const amount = smoothstep(0.10, 0.32, d);
+    bubbleInstances = state.bubbleCount;
+    if (bubbleInstances <= 0 || amount <= BUBBLE_MIN_AMOUNT) return;
+    if (isUI && scissorCount === 0) return;
+
+    gl.useProgram(bubbles.prog);
+    gl.uniform2f(bubbles.u.uRes, w, h);
+    gl.uniform1f(bubbles.u.uTime, state.clock);
+    gl.uniform1f(bubbles.u.uWarp, BUBBLE_WARP * smoothstep(0.15, 0.60, d));
+    gl.uniform1f(bubbles.u.uAmount, amount);
+    gl.uniform1f(bubbles.u.uCamPitch, state.frame.camPitch);
+    gl.uniform3f(bubbles.u.uPhase, state.frame.phase[0], state.frame.phase[1], state.frame.phase[2]);
+
+    gl.bindVertexArray(bubbleVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bubbleBuf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, state.bubbles, 0, bubbleInstances * BUBBLE_STRIDE);
+
+    /* rgb: bubble light over the scene darkened by the bubble's alpha.
+       The target's own alpha is left untouched. */
+    gl.enable(gl.BLEND);
+    gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+    drawScissored(drawBubbleQuads);
+    gl.disable(gl.BLEND);
+
+    gl.bindVertexArray(fullscreenVao);
   }
 
   /* Builds the mip chain (levels 1..OCEAN_MAX_LEVEL) only when
@@ -357,8 +446,6 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     gl.uniform1f(ocean.u.uChop, state.chop);
     gl.uniform1f(ocean.u.uShallow, state.shallow);
     gl.uniform1f(ocean.u.uDive, state.dive);
-    gl.uniform4fv(ocean.u.uBubbles, state.bubbles);
-    gl.uniform1i(ocean.u.uBubbleCount, state.bubbleCount);
     setFrameUniforms(gl, ocean.u, state);
 
     /* Sand on unit 1. The sampler must never default to unit 0: that
@@ -373,7 +460,10 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
-    drawFullscreen();
+    drawScissored(drawTriangle);
+
+    /* ---- pass 1b: bubbles over the ocean, same texture ---- */
+    drawBubbles(state, w, h);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     prepareOceanTexture(needsMips);
@@ -407,7 +497,7 @@ export function createRenderer(canvasId, { isUI, maxPixels = isUI ? Infinity : B
     /* UI layer: the shader discards everything farther than 28 px from a
        panel, so scissoring to the same margin gives identical output
        without running the fragment shader over the rest of the screen. */
-    drawFullscreen();
+    drawScissored(drawTriangle);
     return true;
   }
 

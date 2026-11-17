@@ -2,15 +2,18 @@
    PASS 1 — THE OCEAN
    WebGL2, procedural, above and below the surface.
    Renders the tone-mapped scene into a texture that the glass
-   pass refracts and frosts. Bubbles are drawn here too, so
-   they sit behind the glass rather than over it.
+   pass refracts and frosts.
    The camera, water absorption and shaft colour come from
    GLSL_COMMON so the glass pass lights itself from the same model;
    the per-frame parts of that model (light, camera) are uniforms
    computed on the CPU (gl/lighting.js).
-   Bubble positions are computed and frustum-culled per frame on
-   the CPU (gl/bubble-field.js); only the first uBubbleCount
-   entries are live, and only the ray–sphere test runs here.
+
+   Bubbles are no longer drawn here. They are blended over this
+   pass's output, into the same texture, by their own instanced
+   pass (bubbles.glsl.js), so they still sit behind the glass but
+   only cost the pixels they cover. That pass rebuilds this pass's
+   view ray per pixel: keep the uv shimmer in main() in step with
+   it (BUBBLE_WARP in renderer.js).
 
    Sand: both floors (the deep seabed under water and the shallow
    floor seen through the surface from above) take their albedo
@@ -28,12 +31,9 @@
    doesn't carry an unused sampler.
    ============================================================ */
 import { GLSL_COMMON } from './common.glsl.js';
-import { BUBBLE_COUNT } from '../bubble-field.js';
 
 export const OCEAN_FRAG = `#version 300 es
 precision highp float;
-
-#define BUBBLE_COUNT ${BUBBLE_COUNT}
 
 uniform vec2  uRes;
 uniform float uTime;
@@ -42,8 +42,6 @@ uniform float uScroll;
 uniform float uChop;
 uniform float uShallow;
 uniform float uDive;
-uniform vec4  uBubbles[BUBBLE_COUNT]; // xyz = position relative to the camera (pre-wrapped), w = radius
-uniform int   uBubbleCount;           // visible bubbles, packed at the front of uBubbles
 uniform sampler2D uSand;              // seamless sand photo, sRGB-decoded to linear, mipmapped
 uniform vec3  uSandMean;              // mean linear colour of uSand
 
@@ -406,100 +404,13 @@ vec3 renderUnder(vec3 ro, vec3 rd){
   return col;
 }
 
-/* ---------- True 3D Physical Bubbles (Frutiger Aero Physics) ----------
-   Positions (buoyancy, helical wobble, wrap around the camera) are
-   computed and culled once per frame on the CPU; see gl/bubble-field.js.
-   uBubbles[i].xyz is the bubble relative to the camera, so it is
-   directly the camera-to-bubble vector. Only the first uBubbleCount
-   entries are live; they keep their original order. */
-vec3 addBubbles(vec3 col, vec3 rd, float amount){
-  if (amount <= 0.001) return col;
-  
-  float dayW, sunsetW, nightW;
-  getPhaseWeights(dayW, sunsetW, nightW);
-  
-  // Highlight tint matching ambient day phase
-  vec3 hi_day = vec3(1.0);
-  vec3 hi_set = vec3(1.0, 0.85, 0.6);
-  vec3 hi_nig = vec3(0.7, 0.9, 1.0);
-  vec3 hiCol = hi_day * dayW + hi_set * sunsetW + hi_nig * nightW;
-
-  vec3 finalCol = col;
-  float focalZ = 2.5; // Focal plane distance for Depth of Field
-  
-  for (int i = 0; i < BUBBLE_COUNT; i++){
-    if (i >= uBubbleCount) break;
-    vec4 b = uBubbles[i];
-    vec3 V = b.xyz;          // Vector from camera to bubble
-    float radius = b.w;
-    
-    float Z = dot(V, rd); // Depth along view ray
-    
-    // Frustum cull (skip if behind camera or too far away)
-    if (Z < 0.1 || Z > 8.0) continue;
-    
-    // Perpendicular distance from ray to bubble center
-    vec3 perp = V - Z * rd;
-    float dist = length(perp);
-    
-    // Dynamic Depth of field blur factor
-    float blur = mix(0.001, 0.04, abs(Z - focalZ) * 0.15);
-    
-    if (dist < radius + blur) {
-        float alpha = smoothstep(radius + blur, radius - blur, dist);
-        
-        // Reconstruct precise 3D Normal of the intersected sphere
-        float nZ = sqrt(max(0.0, 1.0 - (dist/radius)*(dist/radius)));
-        vec3 N = normalize(-perp - rd * (radius * nZ));
-        
-        float ndotv = max(dot(N, -rd), 0.0);
-        float f = 1.0 - ndotv;
-        
-        // --- Exaggerated Aero Optics ---
-        
-        // 1. Refraction Darkening Center (Diverging Lens effect)
-        vec3 refrCol = col * mix(0.4, 0.9, ndotv);
-        
-        // 2. Chromatic Aberration Rim (Prismatic TIR Edge)
-        vec3 ca = vec3(pow(f, 3.0), pow(f, 2.4), pow(f, 1.8));
-        vec3 rimDark = mix(vec3(0.0, 0.1, 0.2), vec3(0.1, 0.02, 0.0), sunsetW);
-        vec3 rimBright = mix(vec3(0.3, 0.8, 1.0), vec3(1.0, 0.5, 0.1), sunsetW);
-        vec3 edgeCol = mix(rimBright * ca, rimDark, pow(f, 6.0));
-        
-        // 3. Studio Softbox Reflection (Broad top highlight)
-        float softbox = smoothstep(0.2, 0.9, dot(N, vec3(0.0, 1.0, 0.0))) * 0.5;
-        
-        // 4. Razor Sharp Specular Highlights (Primary Sun/Light)
-        vec3 lightDir = normalize(vec3(0.4, 0.8, -0.6));
-        vec3 H = normalize(lightDir - rd);
-        float specMain = pow(max(dot(N, H), 0.0), 600.0) * 4.0;
-        
-        // 5. Anamorphic Lens Flare (Horizontal streak)
-        float flare = pow(max(dot(N, H), 0.0), 60.0) * pow(max(1.0 - abs(N.x), 0.0), 12.0) * 2.0;
-        
-        // 6. Bottom Glow (Internal bounce volume)
-        float innerGlow = smoothstep(0.1, -0.8, dot(N, vec3(0.0, 1.0, 0.0))) * 0.4;
-        
-        // Combine all optic layers
-        vec3 bubbleCol = refrCol + edgeCol + (softbox + innerGlow) * hiCol + (specMain + flare) * hiCol;
-        
-        // Fade out smoothly at the cell's vertical boundaries to prevent grid popping
-        float life = smoothstep(-4.0, -3.0, V.y) * smoothstep(4.0, 3.0, V.y);
-        
-        // Fade out at far distances
-        float fade = smoothstep(8.0, 5.0, Z) * amount * life;
-        
-        finalCol = mix(finalCol, bubbleCol, alpha * fade);
-    }
-  }
-  return clamp(finalCol, 0.0, 1.0);
-}
-
 void main(){
   vec2 uv = (gl_FragCoord.xy * 2.0 - uRes) / uRes.y;
   float d = clamp(uDive, 0.0, 1.0);
   float sub = smoothstep(0.15, 0.60, d);
 
+  /* Underwater shimmer. The bubble pass (bubbles.glsl.js) applies the
+     same offset so its bubbles line up with this image. */
   uv += vec2(sin(uv.y * 7.0 + uTime * 0.9), cos(uv.x * 6.0 + uTime * 0.75)) * 0.0045 * sub;
 
   vec3 ro = camOrigin();
@@ -529,8 +440,7 @@ void main(){
   col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, mix(1.12, 1.04, sub));
   col *= 1.0 - 0.45 * sub * smoothstep(0.55, 1.85, length(uv));
 
-  col = addBubbles(col, rd, smoothstep(0.10, 0.32, d));
-
+  /* Bubbles are blended over this output by the bubble pass */
   fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
 `;
